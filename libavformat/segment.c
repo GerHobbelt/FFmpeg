@@ -31,6 +31,9 @@
 #include "avformat.h"
 #include "avio_internal.h"
 #include "internal.h"
+#if HAVE_UNISTD_H
+#include <unistd.h>
+#endif
 
 #include "libavutil/avassert.h"
 #include "libavutil/internal.h"
