@@ -144,6 +144,7 @@ HWDevice *filter_hw_device;
 
 char *vstats_filename;
 char *sdp_filename;
+char *progress_filename;
 
 float audio_drift_threshold = 0.1;
 float dts_delta_threshold   = 10;
@@ -156,6 +157,7 @@ float frame_drop_threshold = 0;
 int do_deinterlace    = 0;
 int do_benchmark      = 0;
 int do_benchmark_all  = 0;
+int fix_dts           = 1;
 int do_hex_dump       = 0;
 int do_pkt_dump       = 0;
 int copy_ts           = 0;
@@ -3420,19 +3422,21 @@ fail:
 
 static int opt_progress(void *optctx, const char *opt, const char *arg)
 {
-    AVIOContext *avio = NULL;
-    int ret;
+//     AVIOContext *avio = NULL;
+//     int ret;
 
-    if (!strcmp(arg, "-"))
-        arg = "pipe:";
-    ret = avio_open2(&avio, arg, AVIO_FLAG_WRITE, &int_cb, NULL);
-    if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Failed to open progress URL \"%s\": %s\n",
-               arg, av_err2str(ret));
-        return ret;
-    }
-    progress_avio = avio;
-    return 0;
+//     if (!strcmp(arg, "-"))
+//         arg = "pipe:";
+//     ret = avio_open2(&avio, arg, AVIO_FLAG_WRITE, &int_cb, NULL);
+//     if (ret < 0) {
+//         av_log(NULL, AV_LOG_ERROR, "Failed to open progress URL \"%s\": %s\n",
+//                arg, av_err2str(ret));
+//         return ret;
+//     }
+//     progress_avio = avio;
+//     return 0;
+     progress_filename = arg;
+     return 0;
 }
 
 #define OFFSET(x) offsetof(OptionsContext, x)
@@ -3521,6 +3525,8 @@ const OptionDef options[] = {
         "dump each input packet" },
     { "hex",            OPT_BOOL | OPT_EXPERT,                       { &do_hex_dump },
         "when dumping packets, also dump the payload" },
+    { "fix_dts",        OPT_BOOL | OPT_EXPERT,                       { &fix_dts },
+        "fix invalid dts" },
     { "re",             OPT_BOOL | OPT_EXPERT | OPT_OFFSET |
                         OPT_INPUT,                                   { .off = OFFSET(rate_emu) },
         "read input at native frame rate", "" },
