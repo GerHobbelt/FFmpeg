@@ -603,7 +603,8 @@ extern int print_stats;
 extern int qp_hist;
 extern int stdin_interaction;
 extern int frame_bits_per_raw_sample;
-extern AVIOContext *progress_avio;
+extern char *progress_filename;
+extern int fix_dts;
 extern float max_error_rate;
 extern char *videotoolbox_pixfmt;
 
