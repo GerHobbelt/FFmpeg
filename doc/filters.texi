@@ -1703,6 +1703,14 @@ Specify weight of each input audio stream as sequence.
 Each weight is separated by space. By default all inputs have same weight.
 @end table
 
+@subsection Commands
+
+This filter supports the following commands:
+@table @option
+@item weights
+Syntax is same as option with same name.
+@end table
+
 @section amultiply
 
 Multiply first audio stream with second audio stream and store result
@@ -2329,6 +2337,8 @@ RMS_trough
 Crest_factor
 Flat_factor
 Peak_count
+Noise_floor
+Noise_floor_count
 Bit_depth
 Dynamic_range
 Zero_crossings
@@ -2351,6 +2361,8 @@ RMS_peak
 RMS_trough
 Flat_factor
 Peak_count
+Noise_floor
+Noise_floor_count
 Bit_depth
 Number_of_samples
 Number_of_NaNs
@@ -2422,6 +2434,13 @@ Flatness (i.e. consecutive samples with the same value) of the signal at its pea
 Number of occasions (not the number of samples) that the signal attained either
 @var{Min level} or @var{Max level}.
 
+@item Noise floor dB
+Minimum local peak measured in dBFS over a short window.
+
+@item Noise floor count
+Number of occasions (not the number of samples) that the signal attained
+@var{Noise floor}.
+
 @item Bit depth
 Overall bit depth of audio. Number of bits used for each sample.
 
@@ -2434,6 +2453,45 @@ Number of points where the waveform crosses the zero level axis.
 @item Zero crossings rate
 Rate of Zero crossings and number of audio samples.
 @end table
+
+@section asubboost
+Boost subwoofer frequencies.
+
+The filter accepts the following options:
+
+@table @option
+@item dry
+Set dry gain, how much of original signal is kept. Allowed range is from 0 to 1.
+Default value is 0.5.
+
+@item wet
+Set wet gain, how much of filtered signal is kept. Allowed range is from 0 to 1.
+Default value is 0.8.
+
+@item decay
+Set delay line decay gain value. Allowed range is from 0 to 1.
+Default value is 0.7.
+
+@item feedback
+Set delay line feedback gain value. Allowed range is from 0 to 1.
+Default value is 0.5.
+
+@item cutoff
+Set cutoff frequency in herz. Allowed range is 50 to 900.
+Default value is 100.
+
+@item slope
+Set slope amount for cutoff frequency. Allowed range is 0.0001 to 1.
+Default value is 0.5.
+
+@item delay
+Set delay. Allowed range is from 1 to 100.
+Default value is 20.
+@end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @section atempo
 
@@ -3209,12 +3267,20 @@ Set soundstage wideness. Default is 0.5. Allowed range is from 0 to 1.
 This sets cut off frequency of low shelf filter. Default is cut off near
 1550 Hz. With range set to 1 cut off frequency is set to 2100 Hz.
 
+@item slope
+Set curve slope of low shelf filter. Default is 0.5.
+Allowed range is from 0.01 to 1.
+
 @item level_in
 Set input gain. Default is 0.9.
 
 @item level_out
 Set output gain. Default is 1.
 @end table
+
+@subsection Commands
+
+This filter supports the all above options as @ref{commands}.
 
 @section crystalizer
 Simple algorithm to expand audio dynamic range.
@@ -6532,11 +6598,20 @@ Default is disabled.
 
 Detect video intervals that are (almost) completely black. Can be
 useful to detect chapter transitions, commercials, or invalid
-recordings. Output lines contains the time for the start, end and
-duration of the detected black interval expressed in seconds.
+recordings.
 
-In order to display the output lines, you need to set the loglevel at
-least to the AV_LOG_INFO value.
+The filter outputs its detection analysis to both the log as well as
+frame metadata. If a black segment of at least the specified minimum
+duration is found, a line with the start and end timestamps as well
+as duration is printed to the log with level @code{info}. In addition,
+a log line with level @code{debug} is printed per frame showing the
+black amount detected for that frame.
+
+The filter also attaches metadata to the first frame of a black
+segment with key @code{lavfi.black_start} and to the first frame
+after the black segment ends with key @code{lavfi.black_end}. The
+value is the frame's timestamp. This metadata is added regardless
+of the minimum duration specified.
 
 The filter accepts the following options:
 
@@ -8878,6 +8953,7 @@ delogo=x=0:y=0:w=100:h=77:band=10
 
 @end itemize
 
+@anchor{derain}
 @section derain
 
 Remove the rain in the input image/video by applying the derain methods based on
@@ -8931,6 +9007,8 @@ Set path to model file specifying network architecture and its parameters.
 Note that different backends use different file formats. TensorFlow and native
 backend can load files for only its format.
 @end table
+
+It can also be finished with @ref{dnn_processing} filter.
 
 @section deshake
 
@@ -9201,9 +9279,9 @@ Set the output name of the dnn network.
 
 @itemize
 @item
-Halve the red channle of the frame with format rgb24:
+Remove rain in rgb24 frame with can.pb (see @ref{derain} filter):
 @example
-ffmpeg -i input.jpg -vf format=rgb24,dnn_processing=model=halve_first_channel.model:input=dnn_in:output=dnn_out:dnn_backend=native out.native.png
+./ffmpeg -i rain.jpg -vf format=rgb24,dnn_processing=dnn_backend=tensorflow:model=can.pb:input=x:output=y derain.jpg
 @end example
 
 @item
@@ -13232,6 +13310,27 @@ This filter accepts the following options:
 @item planes
 Set which planes will be processed as bitmap, unprocessed planes will be
 copied from first stream.
+By default value 0xf, all planes will be processed.
+@end table
+
+@section maskedthreshold
+Pick pixels comparing absolute difference of two video streams with fixed
+threshold.
+
+If absolute difference between pixel component of first and second video
+stream is equal or lower than user supplied threshold than pixel component
+from first video stream is picked, otherwise pixel component from second
+video stream is picked.
+
+This filter accepts the following options:
+@table @option
+@item threshold
+Set threshold used when picking pixels from absolute difference from two input
+video streams.
+
+@item planes
+Set which planes will be processed as bitmap, unprocessed planes will be
+copied from second stream.
 By default value 0xf, all planes will be processed.
 @end table
 
@@ -18359,6 +18458,25 @@ enabled for @option{mode} @var{interleave_top} and @var{interleave_bottom}.
 
 @end table
 
+@section tmedian
+Pick median pixels from several successive input video frames.
+
+The filter accepts the following options:
+
+@table @option
+@item radius
+Set radius of median filter.
+Default is 1. Allowed range is from 1 to 127.
+
+@item planes
+Set which planes to filter. Default value is @code{15}, by which all planes are processed.
+
+@item percentile
+Set median percentile. Default value is @code{0.5}.
+Default value of @code{0.5} will pick always median values, while @code{0} will pick
+minimum values, and @code{1} maximum values.
+@end table
+
 @section tmix
 
 Mix successive video frames.
@@ -18893,6 +19011,7 @@ No padding.
 @end table
 
 Default value is @b{@samp{0}}.
+Maximum value is @b{@samp{0.1}}.
 
 @item fin_pad
 @item fout_pad
@@ -18971,19 +19090,19 @@ Dual fisheye.
 
 Format specific options:
 @table @option
-@item in_pad
-@item out_pad
-Set padding proportion. Values in decimals.
+@item h_fov
+@item v_fov
+@item d_fov
+Set output horizontal/vertical/diagonal field of view. Values in degrees.
 
-Example values:
-@table @samp
-@item 0
-No padding.
-@item 0.01
-1% padding.
-@end table
+If diagonal field of view is set it overrides horizontal and vertical field of view.
 
-Default value is @b{@samp{0}}.
+@item ih_fov
+@item iv_fov
+@item id_fov
+Set input horizontal/vertical/diagonal field of view. Values in degrees.
+
+If diagonal field of view is set it overrides horizontal and vertical field of view.
 @end table
 
 @item barrel
@@ -20116,6 +20235,10 @@ Set one of available transition effects:
 @item diagtr
 @item diagbl
 @item diagbr
+@item hlslice
+@item hrslice
+@item vuslice
+@item vdslice
 @end table
 Default transition effect is fade.
 
@@ -23249,6 +23372,21 @@ These filters accept the following options:
 @table @option
 @item nb_inputs, n
 Set the number of different inputs, it is 2 by default.
+
+@item duration
+How to determine the end-of-stream.
+
+@table @option
+@item longest
+The duration of the longest input. (default)
+
+@item shortest
+The duration of the shortest input.
+
+@item first
+The duration of the first input.
+@end table
+
 @end table
 
 @subsection Examples
