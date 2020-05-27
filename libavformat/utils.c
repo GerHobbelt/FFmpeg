@@ -638,11 +638,11 @@ FF_ENABLE_DEPRECATION_WARNINGS
     if (id3v2_extra_meta) {
         if (!strcmp(s->iformat->name, "mp3") || !strcmp(s->iformat->name, "aac") ||
             !strcmp(s->iformat->name, "tta") || !strcmp(s->iformat->name, "wav")) {
-            if ((ret = ff_id3v2_parse_apic(s, &id3v2_extra_meta)) < 0)
+            if ((ret = ff_id3v2_parse_apic(s, id3v2_extra_meta)) < 0)
                 goto close;
-            if ((ret = ff_id3v2_parse_chapters(s, &id3v2_extra_meta)) < 0)
+            if ((ret = ff_id3v2_parse_chapters(s, id3v2_extra_meta)) < 0)
                 goto close;
-            if ((ret = ff_id3v2_parse_priv(s, &id3v2_extra_meta)) < 0)
+            if ((ret = ff_id3v2_parse_priv(s, id3v2_extra_meta)) < 0)
                 goto close;
         } else
             av_log(s, AV_LOG_DEBUG, "demuxer does not support additional id3 data, skipping\n");
@@ -1011,7 +1011,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     }
 }
 
-static int is_intra_only(enum AVCodecID id)
+int ff_is_intra_only(enum AVCodecID id)
 {
     const AVCodecDescriptor *d = avcodec_descriptor_get(id);
     if (!d)
@@ -1410,7 +1410,7 @@ static void compute_pkt_fields(AVFormatContext *s, AVStream *st,
             presentation_delayed, delay, av_ts2str(pkt->pts), av_ts2str(pkt->dts), av_ts2str(st->cur_dts), st->index, st->id);
 
     /* update flags */
-    if (st->codecpar->codec_type == AVMEDIA_TYPE_DATA || is_intra_only(st->codecpar->codec_id))
+    if (st->codecpar->codec_type == AVMEDIA_TYPE_DATA || ff_is_intra_only(st->codecpar->codec_id))
         pkt->flags |= AV_PKT_FLAG_KEY;
 #if FF_API_CONVERGENCE_DURATION
 FF_DISABLE_DEPRECATION_WARNINGS
@@ -5507,6 +5507,8 @@ uint8_t *av_stream_get_side_data(const AVStream *st,
             return st->side_data[i].data;
         }
     }
+    if (size)
+        *size = 0;
     return NULL;
 }
 

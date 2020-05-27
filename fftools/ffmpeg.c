@@ -182,7 +182,7 @@ static int sub2video_get_blank_frame(InputStream *ist)
     ist->sub2video.frame->width  = ist->dec_ctx->width  ? ist->dec_ctx->width  : ist->sub2video.w;
     ist->sub2video.frame->height = ist->dec_ctx->height ? ist->dec_ctx->height : ist->sub2video.h;
     ist->sub2video.frame->format = AV_PIX_FMT_RGB32;
-    if ((ret = av_frame_get_buffer(frame, 32)) < 0)
+    if ((ret = av_frame_get_buffer(frame, 0)) < 0)
         return ret;
     memset(frame->data[0], 0, frame->height * frame->linesize[0]);
     return 0;
@@ -501,32 +501,37 @@ static void ffmpeg_cleanup(int ret)
         FilterGraph *fg = filtergraphs[i];
         avfilter_graph_free(&fg->graph);
         for (j = 0; j < fg->nb_inputs; j++) {
-            while (av_fifo_size(fg->inputs[j]->frame_queue)) {
+            InputFilter *ifilter = fg->inputs[j];
+            struct InputStream *ist = ifilter->ist;
+
+            while (av_fifo_size(ifilter->frame_queue)) {
                 AVFrame *frame;
-                av_fifo_generic_read(fg->inputs[j]->frame_queue, &frame,
+                av_fifo_generic_read(ifilter->frame_queue, &frame,
                                      sizeof(frame), NULL);
                 av_frame_free(&frame);
             }
-            av_fifo_freep(&fg->inputs[j]->frame_queue);
-            if (fg->inputs[j]->ist->sub2video.sub_queue) {
-                while (av_fifo_size(fg->inputs[j]->ist->sub2video.sub_queue)) {
+            av_fifo_freep(&ifilter->frame_queue);
+            if (ist->sub2video.sub_queue) {
+                while (av_fifo_size(ist->sub2video.sub_queue)) {
                     AVSubtitle sub;
-                    av_fifo_generic_read(fg->inputs[j]->ist->sub2video.sub_queue,
+                    av_fifo_generic_read(ist->sub2video.sub_queue,
                                          &sub, sizeof(sub), NULL);
                     avsubtitle_free(&sub);
                 }
-                av_fifo_freep(&fg->inputs[j]->ist->sub2video.sub_queue);
+                av_fifo_freep(&ist->sub2video.sub_queue);
             }
-            av_buffer_unref(&fg->inputs[j]->hw_frames_ctx);
-            av_freep(&fg->inputs[j]->name);
+            av_buffer_unref(&ifilter->hw_frames_ctx);
+            av_freep(&ifilter->name);
             av_freep(&fg->inputs[j]);
         }
         av_freep(&fg->inputs);
         for (j = 0; j < fg->nb_outputs; j++) {
-            av_freep(&fg->outputs[j]->name);
-            av_freep(&fg->outputs[j]->formats);
-            av_freep(&fg->outputs[j]->channel_layouts);
-            av_freep(&fg->outputs[j]->sample_rates);
+            OutputFilter *ofilter = fg->outputs[j];
+
+            av_freep(&ofilter->name);
+            av_freep(&ofilter->formats);
+            av_freep(&ofilter->channel_layouts);
+            av_freep(&ofilter->sample_rates);
             av_freep(&fg->outputs[j]);
         }
         av_freep(&fg->outputs);
@@ -4716,6 +4721,10 @@ static int transcode(void)
             av_freep(&ost->enc_ctx->stats_in);
         }
         total_packets_written += ost->packets_written;
+        if (!ost->packets_written && (abort_on_flags & ABORT_ON_FLAG_EMPTY_OUTPUT_STREAM)) {
+            av_log(NULL, AV_LOG_FATAL, "Empty output on stream %d.\n", i);
+            exit_program(1);
+        }
     }
 
     if (!total_packets_written && (abort_on_flags & ABORT_ON_FLAG_EMPTY_OUTPUT)) {

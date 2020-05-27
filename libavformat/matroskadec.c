@@ -259,6 +259,7 @@ typedef struct MatroskaTrack {
 typedef struct MatroskaAttachment {
     uint64_t uid;
     char *filename;
+    char *description;
     char *mime;
     EbmlBin bin;
 
@@ -587,7 +588,7 @@ static EbmlSyntax matroska_attachment[] = {
     { MATROSKA_ID_FILENAME,     EBML_UTF8, 0, offsetof(MatroskaAttachment, filename) },
     { MATROSKA_ID_FILEMIMETYPE, EBML_STR,  0, offsetof(MatroskaAttachment, mime) },
     { MATROSKA_ID_FILEDATA,     EBML_BIN,  0, offsetof(MatroskaAttachment, bin) },
-    { MATROSKA_ID_FILEDESC,     EBML_NONE },
+    { MATROSKA_ID_FILEDESC,     EBML_UTF8, 0, offsetof(MatroskaAttachment, description) },
     CHILD_OF(matroska_attachments)
 };
 
@@ -1135,7 +1136,7 @@ static int is_ebml_id_valid(uint32_t id)
  * an entry already exists, return the existing entry.
  */
 static MatroskaLevel1Element *matroska_find_level1_elem(MatroskaDemuxContext *matroska,
-                                                        uint32_t id)
+                                                        uint32_t id, int64_t pos)
 {
     int i;
     MatroskaLevel1Element *elem;
@@ -1147,19 +1148,18 @@ static MatroskaLevel1Element *matroska_find_level1_elem(MatroskaDemuxContext *ma
     if (id == MATROSKA_ID_CLUSTER)
         return NULL;
 
-    // There can be multiple seekheads.
-    if (id != MATROSKA_ID_SEEKHEAD) {
-        for (i = 0; i < matroska->num_level1_elems; i++) {
-            if (matroska->level1_elems[i].id == id)
+    // There can be multiple SeekHeads and Tags.
+    for (i = 0; i < matroska->num_level1_elems; i++) {
+        if (matroska->level1_elems[i].id == id) {
+            if (matroska->level1_elems[i].pos == pos ||
+                id != MATROSKA_ID_SEEKHEAD && id != MATROSKA_ID_TAGS)
                 return &matroska->level1_elems[i];
         }
     }
 
     // Only a completely broken file would have more elements.
-    // It also provides a low-effort way to escape from circular seekheads
-    // (every iteration will add a level1 entry).
     if (matroska->num_level1_elems >= FF_ARRAY_ELEMS(matroska->level1_elems)) {
-        av_log(matroska->ctx, AV_LOG_ERROR, "Too many level1 elements or circular seekheads.\n");
+        av_log(matroska->ctx, AV_LOG_ERROR, "Too many level1 elements.\n");
         return NULL;
     }
 
@@ -1408,7 +1408,7 @@ static int ebml_parse(MatroskaDemuxContext *matroska,
         if (id == MATROSKA_ID_CUES)
             matroska->cues_parsing_deferred = 0;
         if (syntax->type == EBML_LEVEL1 &&
-            (level1_elem = matroska_find_level1_elem(matroska, syntax->id))) {
+            (level1_elem = matroska_find_level1_elem(matroska, syntax->id, pos))) {
             if (!level1_elem->pos) {
                 // Zero is not a valid position for a level 1 element.
                 level1_elem->pos = pos;
@@ -1772,7 +1772,7 @@ static void matroska_convert_tags(AVFormatContext *s)
                 }
             }
             if (!found) {
-                av_log(NULL, AV_LOG_WARNING,
+                av_log(s, AV_LOG_WARNING,
                        "The tags at index %d refer to a "
                        "non-existent attachment %"PRId64".\n",
                        i, tags[i].target.attachuid);
@@ -1789,7 +1789,7 @@ static void matroska_convert_tags(AVFormatContext *s)
                 }
             }
             if (!found) {
-                av_log(NULL, AV_LOG_WARNING,
+                av_log(s, AV_LOG_WARNING,
                        "The tags at index %d refer to a non-existent chapter "
                        "%"PRId64".\n",
                        i, tags[i].target.chapteruid);
@@ -1806,7 +1806,7 @@ static void matroska_convert_tags(AVFormatContext *s)
                }
             }
             if (!found) {
-                av_log(NULL, AV_LOG_WARNING,
+                av_log(s, AV_LOG_WARNING,
                        "The tags at index %d refer to a non-existent track "
                        "%"PRId64".\n",
                        i, tags[i].target.trackuid);
@@ -1866,8 +1866,12 @@ static void matroska_execute_seekhead(MatroskaDemuxContext *matroska)
         MatroskaSeekhead *seekheads = seekhead_list->elem;
         uint32_t id = seekheads[i].id;
         int64_t pos = seekheads[i].pos + matroska->segment_start;
+        MatroskaLevel1Element *elem;
 
-        MatroskaLevel1Element *elem = matroska_find_level1_elem(matroska, id);
+        if (id != seekheads[i].id || pos < matroska->segment_start)
+            continue;
+
+        elem = matroska_find_level1_elem(matroska, id, pos);
         if (!elem || elem->parsed)
             continue;
 
@@ -2154,7 +2158,9 @@ static int mkv_parse_video_color(AVStream *st, const MatroskaTrack *track) {
     return 0;
 }
 
-static int mkv_parse_video_projection(AVStream *st, const MatroskaTrack *track) {
+static int mkv_parse_video_projection(AVStream *st, const MatroskaTrack *track,
+                                      void *logctx)
+{
     AVSphericalMapping *spherical;
     enum AVSphericalProjection projection;
     size_t spherical_size;
@@ -2167,7 +2173,7 @@ static int mkv_parse_video_projection(AVStream *st, const MatroskaTrack *track) 
                      track->video.projection.private.size);
 
     if (bytestream2_get_byte(&gb) != 0) {
-        av_log(NULL, AV_LOG_WARNING, "Unknown spherical metadata\n");
+        av_log(logctx, AV_LOG_WARNING, "Unknown spherical metadata\n");
         return 0;
     }
 
@@ -2182,14 +2188,14 @@ static int mkv_parse_video_projection(AVStream *st, const MatroskaTrack *track) 
             r = bytestream2_get_be32(&gb);
 
             if (b >= UINT_MAX - t || r >= UINT_MAX - l) {
-                av_log(NULL, AV_LOG_ERROR,
+                av_log(logctx, AV_LOG_ERROR,
                        "Invalid bounding rectangle coordinates "
                        "%"PRIu32",%"PRIu32",%"PRIu32",%"PRIu32"\n",
                        l, t, r, b);
                 return AVERROR_INVALIDDATA;
             }
         } else if (track->video.projection.private.size != 0) {
-            av_log(NULL, AV_LOG_ERROR, "Unknown spherical metadata\n");
+            av_log(logctx, AV_LOG_ERROR, "Unknown spherical metadata\n");
             return AVERROR_INVALIDDATA;
         }
 
@@ -2200,19 +2206,19 @@ static int mkv_parse_video_projection(AVStream *st, const MatroskaTrack *track) 
         break;
     case MATROSKA_VIDEO_PROJECTION_TYPE_CUBEMAP:
         if (track->video.projection.private.size < 4) {
-            av_log(NULL, AV_LOG_ERROR, "Missing projection private properties\n");
+            av_log(logctx, AV_LOG_ERROR, "Missing projection private properties\n");
             return AVERROR_INVALIDDATA;
         } else if (track->video.projection.private.size == 12) {
             uint32_t layout = bytestream2_get_be32(&gb);
             if (layout) {
-                av_log(NULL, AV_LOG_WARNING,
+                av_log(logctx, AV_LOG_WARNING,
                        "Unknown spherical cubemap layout %"PRIu32"\n", layout);
                 return 0;
             }
             projection = AV_SPHERICAL_CUBEMAP;
             padding = bytestream2_get_be32(&gb);
         } else {
-            av_log(NULL, AV_LOG_ERROR, "Unknown spherical metadata\n");
+            av_log(logctx, AV_LOG_ERROR, "Unknown spherical metadata\n");
             return AVERROR_INVALIDDATA;
         }
         break;
@@ -2220,7 +2226,7 @@ static int mkv_parse_video_projection(AVStream *st, const MatroskaTrack *track) 
         /* No Spherical metadata */
         return 0;
     default:
-        av_log(NULL, AV_LOG_WARNING,
+        av_log(logctx, AV_LOG_WARNING,
                "Unknown spherical metadata type %"PRIu64"\n",
                track->video.projection.type);
         return 0;
@@ -2776,7 +2782,7 @@ static int matroska_parse_tracks(AVFormatContext *s)
             ret = mkv_parse_video_color(st, track);
             if (ret < 0)
                 return ret;
-            ret = mkv_parse_video_projection(st, track);
+            ret = mkv_parse_video_projection(st, track, matroska->ctx);
             if (ret < 0)
                 return ret;
         } else if (track->type == MATROSKA_TRACK_TYPE_AUDIO) {
@@ -2911,6 +2917,8 @@ static int matroska_read_header(AVFormatContext *s)
                 break;
             av_dict_set(&st->metadata, "filename", attachments[j].filename, 0);
             av_dict_set(&st->metadata, "mimetype", attachments[j].mime, 0);
+            if (attachments[j].description)
+                av_dict_set(&st->metadata, "title", attachments[j].description, 0);
             st->codecpar->codec_id   = AV_CODEC_ID_NONE;
 
             for (i = 0; mkv_image_mime_tags[i].id != AV_CODEC_ID_NONE; i++) {
@@ -3029,9 +3037,9 @@ static int matroska_parse_laces(MatroskaDemuxContext *matroska, uint8_t **buf,
     if (size <= 0)
         return AVERROR_INVALIDDATA;
 
-    *laces    = *data + 1;
-    data     += 1;
-    size     -= 1;
+    *laces = *data + 1;
+    data  += 1;
+    size  -= 1;
 
     switch (type) {
     case 0x1: /* Xiph lacing */
@@ -3041,31 +3049,26 @@ static int matroska_parse_laces(MatroskaDemuxContext *matroska, uint8_t **buf,
         for (n = 0; n < *laces - 1; n++) {
             lace_size[n] = 0;
 
-            while (1) {
-                if (size <= total) {
+            do {
+                if (size <= total)
                     return AVERROR_INVALIDDATA;
-                }
                 temp          = *data;
                 total        += temp;
                 lace_size[n] += temp;
                 data         += 1;
                 size         -= 1;
-                if (temp != 0xff)
-                    break;
-            }
+            } while (temp ==  0xff);
         }
-        if (size < total) {
+        if (size < total)
             return AVERROR_INVALIDDATA;
-        }
 
         lace_size[n] = size - total;
         break;
     }
 
     case 0x2: /* fixed-size lacing */
-        if (size % (*laces)) {
+        if (size % (*laces))
             return AVERROR_INVALIDDATA;
-        }
         for (n = 0; n < *laces; n++)
             lace_size[n] = size / *laces;
         break;
@@ -3101,15 +3104,15 @@ static int matroska_parse_laces(MatroskaDemuxContext *matroska, uint8_t **buf,
         }
         data += offset;
         size -= offset;
-        if (size < total) {
+        if (size < total)
             return AVERROR_INVALIDDATA;
-        }
+
         lace_size[*laces - 1] = size - total;
         break;
     }
     }
 
-    *buf      = data;
+    *buf = data;
 
     return 0;
 }
