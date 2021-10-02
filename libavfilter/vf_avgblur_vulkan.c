@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/random_seed.h"
 #include "libavutil/opt.h"
 #include "vulkan.h"
 #include "internal.h"
@@ -99,7 +100,7 @@ static av_cold int init_filter(AVFilterContext *ctx, AVFrame *in)
 
     s->vkctx.queue_family_idx = s->vkctx.hwctx->queue_family_comp_index;
     s->vkctx.queue_count = GET_QUEUE_COUNT(s->vkctx.hwctx, 0, 1, 0);
-    s->vkctx.cur_queue_idx = rand() % s->vkctx.queue_count;
+    s->vkctx.cur_queue_idx = av_get_random_seed() % s->vkctx.queue_count;
 
     { /* Create shader for the horizontal pass */
         desc_i[0].updater = s->input_images;
@@ -385,7 +386,6 @@ static const AVFilterPad avgblur_vulkan_inputs[] = {
         .filter_frame = &avgblur_vulkan_filter_frame,
         .config_props = &ff_vk_filter_config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad avgblur_vulkan_outputs[] = {
@@ -394,18 +394,17 @@ static const AVFilterPad avgblur_vulkan_outputs[] = {
         .type = AVMEDIA_TYPE_VIDEO,
         .config_props = &ff_vk_filter_config_output,
     },
-    { NULL }
 };
 
-AVFilter ff_vf_avgblur_vulkan = {
+const AVFilter ff_vf_avgblur_vulkan = {
     .name           = "avgblur_vulkan",
     .description    = NULL_IF_CONFIG_SMALL("Apply avgblur mask to input video"),
     .priv_size      = sizeof(AvgBlurVulkanContext),
     .init           = &ff_vk_filter_init,
     .uninit         = &avgblur_vulkan_uninit,
     .query_formats  = &ff_vk_filter_query_formats,
-    .inputs         = avgblur_vulkan_inputs,
-    .outputs        = avgblur_vulkan_outputs,
+    FILTER_INPUTS(avgblur_vulkan_inputs),
+    FILTER_OUTPUTS(avgblur_vulkan_outputs),
     .priv_class     = &avgblur_vulkan_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 };

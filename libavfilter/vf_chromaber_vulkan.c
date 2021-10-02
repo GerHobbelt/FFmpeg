@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/random_seed.h"
 #include "libavutil/opt.h"
 #include "vulkan.h"
 #include "internal.h"
@@ -75,7 +76,7 @@ static av_cold int init_filter(AVFilterContext *ctx, AVFrame *in)
 
     s->vkctx.queue_family_idx = s->vkctx.hwctx->queue_family_comp_index;
     s->vkctx.queue_count = GET_QUEUE_COUNT(s->vkctx.hwctx, 0, 1, 0);
-    s->vkctx.cur_queue_idx = rand() % s->vkctx.queue_count;
+    s->vkctx.cur_queue_idx = av_get_random_seed() % s->vkctx.queue_count;
 
     s->pl = ff_vk_create_pipeline(ctx);
     if (!s->pl)
@@ -320,7 +321,6 @@ static const AVFilterPad chromaber_vulkan_inputs[] = {
         .filter_frame = &chromaber_vulkan_filter_frame,
         .config_props = &ff_vk_filter_config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad chromaber_vulkan_outputs[] = {
@@ -329,18 +329,17 @@ static const AVFilterPad chromaber_vulkan_outputs[] = {
         .type = AVMEDIA_TYPE_VIDEO,
         .config_props = &ff_vk_filter_config_output,
     },
-    { NULL }
 };
 
-AVFilter ff_vf_chromaber_vulkan = {
+const AVFilter ff_vf_chromaber_vulkan = {
     .name           = "chromaber_vulkan",
     .description    = NULL_IF_CONFIG_SMALL("Offset chroma of input video (chromatic aberration)"),
     .priv_size      = sizeof(ChromaticAberrationVulkanContext),
     .init           = &ff_vk_filter_init,
     .uninit         = &chromaber_vulkan_uninit,
     .query_formats  = &ff_vk_filter_query_formats,
-    .inputs         = chromaber_vulkan_inputs,
-    .outputs        = chromaber_vulkan_outputs,
+    FILTER_INPUTS(chromaber_vulkan_inputs),
+    FILTER_OUTPUTS(chromaber_vulkan_outputs),
     .priv_class     = &chromaber_vulkan_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 };

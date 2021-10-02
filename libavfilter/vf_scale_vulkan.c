@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/random_seed.h"
 #include "libavutil/opt.h"
 #include "vulkan.h"
 #include "scale_eval.h"
@@ -117,7 +118,7 @@ static av_cold int init_filter(AVFilterContext *ctx, AVFrame *in)
 
     s->vkctx.queue_family_idx = s->vkctx.hwctx->queue_family_comp_index;
     s->vkctx.queue_count = GET_QUEUE_COUNT(s->vkctx.hwctx, 0, 1, 0);
-    s->vkctx.cur_queue_idx = rand() % s->vkctx.queue_count;
+    s->vkctx.cur_queue_idx = av_get_random_seed() % s->vkctx.queue_count;
 
     switch (s->scaler) {
     case F_NEAREST:
@@ -511,7 +512,6 @@ static const AVFilterPad scale_vulkan_inputs[] = {
         .filter_frame = &scale_vulkan_filter_frame,
         .config_props = &ff_vk_filter_config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad scale_vulkan_outputs[] = {
@@ -520,18 +520,17 @@ static const AVFilterPad scale_vulkan_outputs[] = {
         .type = AVMEDIA_TYPE_VIDEO,
         .config_props = &scale_vulkan_config_output,
     },
-    { NULL }
 };
 
-AVFilter ff_vf_scale_vulkan = {
+const AVFilter ff_vf_scale_vulkan = {
     .name           = "scale_vulkan",
     .description    = NULL_IF_CONFIG_SMALL("Scale Vulkan frames"),
     .priv_size      = sizeof(ScaleVulkanContext),
     .init           = &ff_vk_filter_init,
     .uninit         = &scale_vulkan_uninit,
     .query_formats  = &ff_vk_filter_query_formats,
-    .inputs         = scale_vulkan_inputs,
-    .outputs        = scale_vulkan_outputs,
+    FILTER_INPUTS(scale_vulkan_inputs),
+    FILTER_OUTPUTS(scale_vulkan_outputs),
     .priv_class     = &scale_vulkan_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 };
