@@ -174,7 +174,7 @@ static int ogg_reset(AVFormatContext *s)
         os->segp       = 0;
         os->incomplete = 0;
         os->got_data = 0;
-        if (start_pos <= s->internal->data_offset) {
+        if (start_pos <= ffformatcontext(s)->data_offset) {
             os->lastpts = 0;
         }
         os->start_trimming = 0;
@@ -206,7 +206,7 @@ static const struct ogg_codec *ogg_find_codec(uint8_t *buf, int size)
  * situation where a new audio stream spawn (identified with a new serial) and
  * must replace the previous one (track switch).
  */
-static int ogg_replace_stream(AVFormatContext *s, uint32_t serial, char *magic,
+static int ogg_replace_stream(AVFormatContext *s, uint32_t serial, char *magic, int page_size,
                               int probing)
 {
     struct ogg *ogg = s->priv_data;
@@ -220,15 +220,16 @@ static int ogg_replace_stream(AVFormatContext *s, uint32_t serial, char *magic,
     }
 
     /* Check for codecs */
-    codec = ogg_find_codec(magic, 8);
+    codec = ogg_find_codec(magic, page_size);
     if (!codec && !probing) {
         av_log(s, AV_LOG_ERROR, "Cannot identify new stream\n");
         return AVERROR_INVALIDDATA;
     }
 
-    /* We only have a single stream anyway, so if there's a new stream with
-     * a different codec just replace it */
     os = &ogg->streams[0];
+    if (os->codec != codec)
+        return AVERROR(EINVAL);
+
     os->serial  = serial;
     os->codec   = codec;
     os->serial  = serial;
@@ -250,7 +251,6 @@ static int ogg_new_stream(AVFormatContext *s, uint32_t serial)
     int idx         = ogg->nstreams;
     AVStream *st;
     struct ogg_stream *os;
-    size_t size;
 
     if (ogg->state) {
         av_log(s, AV_LOG_ERROR, "New streams are not supposed to be added "
@@ -259,8 +259,8 @@ static int ogg_new_stream(AVFormatContext *s, uint32_t serial)
     }
 
     /* Allocate and init a new Ogg Stream */
-    if (av_size_mult(ogg->nstreams + 1, sizeof(*ogg->streams), &size) < 0 ||
-        !(os = av_realloc(ogg->streams, size)))
+    if (!(os = av_realloc_array(ogg->streams, ogg->nstreams + 1,
+                                sizeof(*ogg->streams))))
         return AVERROR(ENOMEM);
     ogg->streams = os;
     os           = ogg->streams + idx;
@@ -412,6 +412,7 @@ static int ogg_read_page(AVFormatContext *s, int *sid, int probing)
         if (idx < 0)
             av_free(readout_buf);
         avio_seek(bc, start_pos, SEEK_SET);
+        *sid = -1;
         return 0;
     }
 
@@ -422,13 +423,14 @@ static int ogg_read_page(AVFormatContext *s, int *sid, int probing)
         if (idx < 0)
             av_free(readout_buf);
         avio_seek(bc, start_pos, SEEK_SET);
+        *sid = -1;
         return 0;
     }
 
     /* CRC is correct so we can be 99% sure there's an actual change here */
     if (idx < 0) {
         if (data_packets_seen(ogg))
-            idx = ogg_replace_stream(s, serial, readout_buf, probing);
+            idx = ogg_replace_stream(s, serial, readout_buf, size, probing);
         else
             idx = ogg_new_stream(s, serial);
 
@@ -495,6 +497,7 @@ static int ogg_read_page(AVFormatContext *s, int *sid, int probing)
 static int ogg_packet(AVFormatContext *s, int *sid, int *dstart, int *dsize,
                       int64_t *fpos)
 {
+    FFFormatContext *const si = ffformatcontext(s);
     struct ogg *ogg = s->priv_data;
     int idx, i, ret;
     struct ogg_stream *os;
@@ -580,8 +583,8 @@ static int ogg_packet(AVFormatContext *s, int *sid, int *dstart, int *dsize,
 
             // Update the header state for all streams and
             // compute the data_offset.
-            if (!s->internal->data_offset)
-                s->internal->data_offset = os->sync_pos;
+            if (!si->data_offset)
+                si->data_offset = os->sync_pos;
 
             for (i = 0; i < ogg->nstreams; i++) {
                 struct ogg_stream *cur_os = ogg->streams + i;
@@ -589,7 +592,7 @@ static int ogg_packet(AVFormatContext *s, int *sid, int *dstart, int *dsize,
                 // if we have a partial non-header packet, its start is
                 // obviously at or after the data start
                 if (cur_os->incomplete)
-                    s->internal->data_offset = FFMIN(s->internal->data_offset, cur_os->sync_pos);
+                    si->data_offset = FFMIN(si->data_offset, cur_os->sync_pos);
             }
         } else {
             os->nb_header++;
@@ -661,7 +664,7 @@ static int ogg_get_length(AVFormatContext *s)
     ogg->page_pos = -1;
 
     while (!ogg_read_page(s, &i, 1)) {
-        if (ogg->streams[i].granule != -1 && ogg->streams[i].granule != 0 &&
+        if (i >= 0 && ogg->streams[i].granule != -1 && ogg->streams[i].granule != 0 &&
             ogg->streams[i].codec) {
             s->streams[i]->duration =
                 ogg_gptopts(s, i, ogg->streams[i].granule, NULL);
@@ -682,7 +685,7 @@ static int ogg_get_length(AVFormatContext *s)
     if (ret < 0)
         return ret;
 
-    avio_seek (s->pb, s->internal->data_offset, SEEK_SET);
+    avio_seek (s->pb, ffformatcontext(s)->data_offset, SEEK_SET);
     ogg_reset(s);
     while (streams_left > 0 && !ogg_packet(s, &i, NULL, NULL, NULL)) {
         int64_t pts;
@@ -729,10 +732,8 @@ static int ogg_read_header(AVFormatContext *s)
     //linear headers seek from start
     do {
         ret = ogg_packet(s, NULL, NULL, NULL, NULL);
-        if (ret < 0) {
-            ogg_read_close(s);
+        if (ret < 0)
             return ret;
-        }
     } while (!ogg->headers);
     av_log(s, AV_LOG_TRACE, "found headers\n");
 
@@ -748,10 +749,8 @@ static int ogg_read_header(AVFormatContext *s)
                    "Headers mismatch for stream %d: "
                    "expected %d received %d.\n",
                    i, os->codec->nb_header, os->nb_header);
-            if (s->error_recognition & AV_EF_EXPLODE) {
-                ogg_read_close(s);
+            if (s->error_recognition & AV_EF_EXPLODE)
                 return AVERROR_INVALIDDATA;
-            }
         }
         if (os->start_granule != OGG_NOGRANULE_VALUE)
             os->lastpts = s->streams[i]->start_time =
@@ -760,10 +759,8 @@ static int ogg_read_header(AVFormatContext *s)
 
     //linear granulepos seek from end
     ret = ogg_get_length(s);
-    if (ret < 0) {
-        ogg_read_close(s);
+    if (ret < 0)
         return ret;
-    }
 
     return 0;
 }
@@ -877,14 +874,12 @@ retry:
     }
 
     if (os->new_metadata) {
-        uint8_t *side_data = av_packet_new_side_data(pkt,
-                                                     AV_PKT_DATA_METADATA_UPDATE,
-                                                     os->new_metadata_size);
-        if(!side_data)
-            return AVERROR(ENOMEM);
+        ret = av_packet_add_side_data(pkt, AV_PKT_DATA_METADATA_UPDATE,
+                                      os->new_metadata, os->new_metadata_size);
+        if (ret < 0)
+            return ret;
 
-        memcpy(side_data, os->new_metadata, os->new_metadata_size);
-        av_freep(&os->new_metadata);
+        os->new_metadata      = NULL;
         os->new_metadata_size = 0;
     }
 
@@ -965,10 +960,11 @@ static int ogg_probe(const AVProbeData *p)
     return 0;
 }
 
-AVInputFormat ff_ogg_demuxer = {
+const AVInputFormat ff_ogg_demuxer = {
     .name           = "ogg",
     .long_name      = NULL_IF_CONFIG_SMALL("Ogg"),
     .priv_data_size = sizeof(struct ogg),
+    .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_probe     = ogg_probe,
     .read_header    = ogg_read_header,
     .read_packet    = ogg_read_packet,
