@@ -71,7 +71,9 @@ typedef struct HTTPContext
     uint64_t chunksize;
     int chunkend;
     uint64_t off, end_off, filesize;
+    char *uri;
     char *location;
+    int cache_redirect;
     HTTPAuthState auth_state;
     HTTPAuthState proxy_auth_state;
     char *http_proxy;
@@ -128,6 +130,7 @@ typedef struct HTTPContext
     int is_multi_client;
     HandshakeState handshake_step;
     int is_connected_server;
+    int short_seek_size;
 } HTTPContext;
 
 #define OFFSET(x) offsetof(HTTPContext, x)
@@ -136,40 +139,43 @@ typedef struct HTTPContext
 #define DEFAULT_USER_AGENT "Lavf/" AV_STRINGIFY(LIBAVFORMAT_VERSION)
 
 static const AVOption options[] = {
-    {"seekable", "control seekability of connection", OFFSET(seekable), AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, D},
-    {"chunked_post", "use chunked transfer-encoding for posts", OFFSET(chunked_post), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, E},
-    {"http_proxy", "set HTTP proxy to tunnel through", OFFSET(http_proxy), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D | E},
-    {"headers", "set custom HTTP headers, can override built in default headers", OFFSET(headers), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D | E},
-    {"content_type", "set a specific content type for the POST messages", OFFSET(content_type), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D | E},
-    {"user_agent", "override User-Agent header", OFFSET(user_agent), AV_OPT_TYPE_STRING, {.str = DEFAULT_USER_AGENT}, 0, 0, D},
-    {"referer", "override referer header", OFFSET(referer), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D},
-    {"multiple_requests", "use persistent connections", OFFSET(multiple_requests), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, D | E},
-    {"post_data", "set custom HTTP post data", OFFSET(post_data), AV_OPT_TYPE_BINARY, .flags = D | E},
-    {"mime_type", "export the MIME type", OFFSET(mime_type), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, AV_OPT_FLAG_EXPORT | AV_OPT_FLAG_READONLY},
-    {"http_version", "export the http response version", OFFSET(http_version), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, AV_OPT_FLAG_EXPORT | AV_OPT_FLAG_READONLY},
-    {"cookies", "set cookies to be sent in applicable future requests, use newline delimited Set-Cookie HTTP field value syntax", OFFSET(cookies), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D},
-    {"icy", "request ICY metadata", OFFSET(icy), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, D},
-    {"icy_metadata_headers", "return ICY metadata headers", OFFSET(icy_metadata_headers), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, AV_OPT_FLAG_EXPORT},
-    {"icy_metadata_packet", "return current ICY metadata packet", OFFSET(icy_metadata_packet), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, AV_OPT_FLAG_EXPORT},
-    {"metadata", "metadata read from the bitstream", OFFSET(metadata), AV_OPT_TYPE_DICT, {0}, 0, 0, AV_OPT_FLAG_EXPORT},
-    {"auth_type", "HTTP authentication type", OFFSET(auth_state.auth_type), AV_OPT_TYPE_INT, {.i64 = HTTP_AUTH_NONE}, HTTP_AUTH_NONE, HTTP_AUTH_BASIC, D | E, "auth_type"},
-    {"none", "No auth method set, autodetect", 0, AV_OPT_TYPE_CONST, {.i64 = HTTP_AUTH_NONE}, 0, 0, D | E, "auth_type"},
-    {"basic", "HTTP basic authentication", 0, AV_OPT_TYPE_CONST, {.i64 = HTTP_AUTH_BASIC}, 0, 0, D | E, "auth_type"},
-    {"send_expect_100", "Force sending an Expect: 100-continue header for POST", OFFSET(send_expect_100), AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, E},
-    {"location", "The actual location of the data received", OFFSET(location), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D | E},
-    {"offset", "initial byte offset", OFFSET(off), AV_OPT_TYPE_INT64, {.i64 = 0}, 0, INT64_MAX, D},
-    {"end_offset", "try to limit the request to bytes preceding this offset", OFFSET(end_off), AV_OPT_TYPE_INT64, {.i64 = 0}, 0, INT64_MAX, D},
-    {"method", "Override the HTTP method or set the expected HTTP method from a client", OFFSET(method), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D | E},
-    {"reconnect", "auto reconnect after disconnect before EOF", OFFSET(reconnect), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, D},
-    {"reconnect_at_eof", "auto reconnect at EOF", OFFSET(reconnect_at_eof), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, D},
-    {"reconnect_on_network_error", "auto reconnect in case of tcp/tls error during connect", OFFSET(reconnect_on_network_error), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, D},
-    {"reconnect_on_http_error", "list of http status codes to reconnect on", OFFSET(reconnect_on_http_error), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, D},
-    {"reconnect_streamed", "auto reconnect streamed / non seekable streams", OFFSET(reconnect_streamed), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, D},
-    {"reconnect_delay_max", "max reconnect delay in seconds after which to give up", OFFSET(reconnect_delay_max), AV_OPT_TYPE_INT, {.i64 = 120}, 0, UINT_MAX / 1000 / 1000, D},
-    {"listen", "listen on HTTP", OFFSET(listen), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 2, D | E},
-    {"resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, E},
-    {"reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, {.i64 = 200}, INT_MIN, 599, E},
-    {NULL}};
+    { "seekable", "control seekability of connection", OFFSET(seekable), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, D },
+    { "chunked_post", "use chunked transfer-encoding for posts", OFFSET(chunked_post), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, E },
+    { "http_proxy", "set HTTP proxy to tunnel through", OFFSET(http_proxy), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D | E },
+    { "headers", "set custom HTTP headers, can override built in default headers", OFFSET(headers), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D | E },
+    { "content_type", "set a specific content type for the POST messages", OFFSET(content_type), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D | E },
+    { "user_agent", "override User-Agent header", OFFSET(user_agent), AV_OPT_TYPE_STRING, { .str = DEFAULT_USER_AGENT }, 0, 0, D },
+    { "referer", "override referer header", OFFSET(referer), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
+    { "multiple_requests", "use persistent connections", OFFSET(multiple_requests), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, D | E },
+    { "post_data", "set custom HTTP post data", OFFSET(post_data), AV_OPT_TYPE_BINARY, .flags = D | E },
+    { "mime_type", "export the MIME type", OFFSET(mime_type), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, AV_OPT_FLAG_EXPORT | AV_OPT_FLAG_READONLY },
+    { "http_version", "export the http response version", OFFSET(http_version), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, AV_OPT_FLAG_EXPORT | AV_OPT_FLAG_READONLY },
+    { "cookies", "set cookies to be sent in applicable future requests, use newline delimited Set-Cookie HTTP field value syntax", OFFSET(cookies), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
+    { "icy", "request ICY metadata", OFFSET(icy), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, D },
+    { "icy_metadata_headers", "return ICY metadata headers", OFFSET(icy_metadata_headers), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, AV_OPT_FLAG_EXPORT },
+    { "icy_metadata_packet", "return current ICY metadata packet", OFFSET(icy_metadata_packet), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, AV_OPT_FLAG_EXPORT },
+    { "metadata", "metadata read from the bitstream", OFFSET(metadata), AV_OPT_TYPE_DICT, {0}, 0, 0, AV_OPT_FLAG_EXPORT },
+    { "auth_type", "HTTP authentication type", OFFSET(auth_state.auth_type), AV_OPT_TYPE_INT, { .i64 = HTTP_AUTH_NONE }, HTTP_AUTH_NONE, HTTP_AUTH_BASIC, D | E, "auth_type"},
+    { "none", "No auth method set, autodetect", 0, AV_OPT_TYPE_CONST, { .i64 = HTTP_AUTH_NONE }, 0, 0, D | E, "auth_type"},
+    { "basic", "HTTP basic authentication", 0, AV_OPT_TYPE_CONST, { .i64 = HTTP_AUTH_BASIC }, 0, 0, D | E, "auth_type"},
+    { "send_expect_100", "Force sending an Expect: 100-continue header for POST", OFFSET(send_expect_100), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, E },
+    { "location", "The actual location of the data received", OFFSET(location), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D | E },
+    { "offset", "initial byte offset", OFFSET(off), AV_OPT_TYPE_INT64, { .i64 = 0 }, 0, INT64_MAX, D },
+    { "end_offset", "try to limit the request to bytes preceding this offset", OFFSET(end_off), AV_OPT_TYPE_INT64, { .i64 = 0 }, 0, INT64_MAX, D },
+    { "method", "Override the HTTP method or set the expected HTTP method from a client", OFFSET(method), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D | E },
+    { "reconnect", "auto reconnect after disconnect before EOF", OFFSET(reconnect), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, D },
+    { "reconnect_at_eof", "auto reconnect at EOF", OFFSET(reconnect_at_eof), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, D },
+    { "reconnect_on_network_error", "auto reconnect in case of tcp/tls error during connect", OFFSET(reconnect_on_network_error), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, D },
+    { "reconnect_on_http_error", "list of http status codes to reconnect on", OFFSET(reconnect_on_http_error), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
+    { "reconnect_streamed", "auto reconnect streamed / non seekable streams", OFFSET(reconnect_streamed), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, D },
+    { "reconnect_delay_max", "max reconnect delay in seconds after which to give up", OFFSET(reconnect_delay_max), AV_OPT_TYPE_INT, { .i64 = 120 }, 0, UINT_MAX/1000/1000, D },
+    { "listen", "listen on HTTP", OFFSET(listen), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 2, D | E },
+    { "resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
+    { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
+    { "short_seek_size", "Threshold to favor readahead over seek.", OFFSET(short_seek_size), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, D },
+    { "cache_redirect", "Save redirected URL for subsequent seek operations", OFFSET(cache_redirect), AV_OPT_TYPE_BOOL, { .i64 = FF_HTTP_CACHE_REDIRECT_DEFAULT }, 0, 1, D },
+    { NULL }
+};
 
 static int http_connect(URLContext *h, const char *path, const char *local_path,
                         const char *hoststr, const char *auth,
@@ -193,7 +199,7 @@ static int http_open_cnx_internal(URLContext *h, AVDictionary **options)
     char *hashmark;
     char hostname[1024], hoststr[1024], proto[10];
     char auth[1024], proxyauth[1024] = "";
-    char path1[MAX_URL_SIZE], sanitized_path[MAX_URL_SIZE];
+    char path1[MAX_URL_SIZE], sanitized_path[MAX_URL_SIZE + 1];
     char buf[1024], urlbuf[MAX_URL_SIZE];
     int port, use_proxy, err, location_changed = 0;
     HTTPContext *s = h->priv_data;
@@ -452,9 +458,15 @@ int ff_http_do_new_request2(URLContext *h, const char *uri, AVDictionary **opts)
     s->chunkend = 0;
     s->off = 0;
     s->icy_data_read = 0;
+
     av_free(s->location);
     s->location = av_strdup(uri);
     if (!s->location)
+        return AVERROR(ENOMEM);
+
+    av_free(s->uri);
+    s->uri = av_strdup(uri);
+    if (!s->uri)
         return AVERROR(ENOMEM);
 
     if ((ret = av_opt_set_dict(s, opts)) < 0)
@@ -657,9 +669,15 @@ static int http_open(URLContext *h, const char *uri, int flags,
         h->is_streamed = 1;
 
     s->filesize = UINT64_MAX;
+
     s->location = av_strdup(uri);
     if (!s->location)
         return AVERROR(ENOMEM);
+
+    s->uri = av_strdup(uri);
+    if (!s->uri)
+        return AVERROR(ENOMEM);
+
     if (options)
         av_dict_copy(&s->chained_options, *options, 0);
 
@@ -689,6 +707,7 @@ bail_out:
     {
         av_dict_free(&s->chained_options);
         av_dict_free(&s->cookie_dict);
+        av_freep(&s->uri);
     }
     return ret;
 }
@@ -1946,6 +1965,7 @@ static int http_close(URLContext *h)
         ffurl_closep(&s->hd);
     av_dict_free(&s->chained_options);
     av_dict_free(&s->cookie_dict);
+    av_freep(&s->uri);
     return ret;
 }
 
@@ -1988,6 +2008,16 @@ static int64_t http_seek_internal(URLContext *h, int64_t off, int whence, int fo
             return s->off;
     }
 
+    /* if redirect caching is disabled, revert to the original uri */
+    if (!s->cache_redirect && strcmp(s->uri, s->location)) {
+        char *new_uri;
+        new_uri = av_strdup(s->uri);
+        if (!new_uri)
+            return AVERROR(ENOMEM);
+        av_free(s->location);
+        s->location = new_uri;
+    }
+
     /* we save the old context in case the seek fails */
     old_buf_size = s->buf_end - s->buf_ptr;
     memcpy(old_buf, s->buf_ptr, old_buf_size);
@@ -2023,6 +2053,8 @@ static int http_get_file_handle(URLContext *h)
 static int http_get_short_seek(URLContext *h)
 {
     HTTPContext *s = h->priv_data;
+    if (s->short_seek_size >= 1)
+        return s->short_seek_size;
     return ffurl_get_short_seek(s->hd);
 }
 

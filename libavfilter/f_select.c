@@ -529,10 +529,10 @@ const AVFilter ff_vf_select = {
     .description   = NULL_IF_CONFIG_SMALL("Select video frames to pass in output."),
     .init          = select_init,
     .uninit        = uninit,
-    .query_formats = query_formats,
     .priv_size     = sizeof(SelectContext),
     .priv_class    = &select_class,
     FILTER_INPUTS(avfilter_vf_select_inputs),
-    .flags         = AVFILTER_FLAG_DYNAMIC_OUTPUTS,
+    FILTER_QUERY_FUNC(query_formats),
+    .flags         = AVFILTER_FLAG_DYNAMIC_OUTPUTS | AVFILTER_FLAG_METADATA_ONLY,
 };
 #endif /* CONFIG_SELECT_FILTER */

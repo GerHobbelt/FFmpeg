@@ -166,13 +166,15 @@ const AVFilter ff_vf_format = {
     .init          = init,
     .uninit        = uninit,
 
-    .query_formats = query_formats,
-
     .priv_size     = sizeof(FormatContext),
     .priv_class    = &format_class,
 
+    .flags         = AVFILTER_FLAG_METADATA_ONLY,
+
     FILTER_INPUTS(avfilter_vf_format_inputs),
     FILTER_OUTPUTS(avfilter_vf_format_outputs),
+
+    FILTER_QUERY_FUNC(query_formats),
 };
 #endif /* CONFIG_FORMAT_FILTER */
 
@@ -201,11 +203,13 @@ const AVFilter ff_vf_noformat = {
     .init          = init,
     .uninit        = uninit,
 
-    .query_formats = query_formats,
-
     .priv_size     = sizeof(FormatContext),
+
+    .flags         = AVFILTER_FLAG_METADATA_ONLY,
 
     FILTER_INPUTS(avfilter_vf_noformat_inputs),
     FILTER_OUTPUTS(avfilter_vf_noformat_outputs),
+
+    FILTER_QUERY_FUNC(query_formats),
 };
 #endif /* CONFIG_NOFORMAT_FILTER */

@@ -160,9 +160,10 @@ const AVFilter ff_af_aformat = {
     .description   = NULL_IF_CONFIG_SMALL("Convert the input audio to one of the specified formats."),
     .init          = init,
     .uninit        = uninit,
-    .query_formats = query_formats,
     .priv_size     = sizeof(AFormatContext),
     .priv_class    = &aformat_class,
+    .flags         = AVFILTER_FLAG_METADATA_ONLY,
     FILTER_INPUTS(avfilter_af_aformat_inputs),
     FILTER_OUTPUTS(avfilter_af_aformat_outputs),
+    FILTER_QUERY_FUNC(query_formats),
 };

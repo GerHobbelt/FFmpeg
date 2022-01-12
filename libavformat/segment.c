@@ -166,10 +166,11 @@ static int segment_mux_init(AVFormatContext *s)
     oc->interrupt_callback = s->interrupt_callback;
     oc->max_delay = s->max_delay;
     av_dict_copy(&oc->metadata, s->metadata, 0);
-    oc->opaque = s->opaque;
-    oc->io_close = s->io_close;
-    oc->io_open = s->io_open;
-    oc->flags = s->flags;
+    oc->opaque             = s->opaque;
+    oc->io_close           = s->io_close;
+    oc->io_close2          = s->io_close2;
+    oc->io_open            = s->io_open;
+    oc->flags              = s->flags;
 
     for (i = 0; i < s->nb_streams; i++)
     {
@@ -702,9 +703,8 @@ static int open_null_ctx(AVIOContext **ctx)
     uint8_t *buf = av_malloc(buf_size);
     if (!buf)
         return AVERROR(ENOMEM);
-    *ctx = avio_alloc_context(buf, buf_size, AVIO_FLAG_WRITE, NULL, NULL, NULL, NULL);
-    if (!*ctx)
-    {
+    *ctx = avio_alloc_context(buf, buf_size, 1, NULL, NULL, NULL, NULL);
+    if (!*ctx) {
         av_free(buf);
         return AVERROR(ENOMEM);
     }
@@ -1177,18 +1177,18 @@ static int seg_write_trailer(struct AVFormatContext *s)
     return ret;
 }
 
-static int seg_check_bitstream(struct AVFormatContext *s, const AVPacket *pkt)
+static int seg_check_bitstream(AVFormatContext *s, AVStream *st,
+                               const AVPacket *pkt)
 {
     SegmentContext *seg = s->priv_data;
     AVFormatContext *oc = seg->avf;
-    if (oc->oformat->check_bitstream)
-    {
-        int ret = oc->oformat->check_bitstream(oc, pkt);
-        if (ret == 1)
-        {
-            FFStream *const sti = ffstream(s->streams[pkt->stream_index]);
-            FFStream *const osti = ffstream(oc->streams[pkt->stream_index]);
-            sti->bsfc = osti->bsfc;
+    if (oc->oformat->check_bitstream) {
+        AVStream *const ost = oc->streams[st->index];
+        int ret = oc->oformat->check_bitstream(oc, ost, pkt);
+        if (ret == 1) {
+            FFStream *const  sti = ffstream(st);
+            FFStream *const osti = ffstream(ost);
+             sti->bsfc = osti->bsfc;
             osti->bsfc = NULL;
         }
         return ret;

@@ -55,8 +55,13 @@ struct AVAESCTR;
 
 typedef struct MOVStts {
     unsigned int count;
-    int duration;
+    unsigned int duration;
 } MOVStts;
+
+typedef struct MOVCtts {
+    unsigned int count;
+    int duration;
+} MOVCtts;
 
 typedef struct MOVStsc {
     int first;
@@ -168,7 +173,7 @@ typedef struct MOVStreamContext {
     uint8_t *sdtp_data;
     unsigned int ctts_count;
     unsigned int ctts_allocated_size;
-    MOVStts *ctts_data;
+    MOVCtts *ctts_data;
     unsigned int stsc_count;
     MOVStsc *stsc_data;
     unsigned int stsc_index;
@@ -237,6 +242,8 @@ typedef struct MOVStreamContext {
     int has_sidx;  // If there is an sidx entry for this stream.
     struct {
         struct AVAESCTR* aes_ctr;
+        struct AVAES *aes_ctx;
+        unsigned int frag_index_entry_base;
         unsigned int per_sample_iv_size;  // Either 0, 8, or 16.
         AVEncryptionInfo *default_encrypted_sample;
         MOVEncryptionIndex *encryption_index;
@@ -298,6 +305,7 @@ typedef struct MOVContext {
     int32_t movie_display_matrix[3][3]; ///< display matrix from mvhd
     int have_read_mfra_size;
     uint32_t mfra_size;
+    uint32_t max_stts_delta;
 } MOVContext;
 
 int ff_mp4_read_descr_len(AVIOContext *pb);
@@ -389,5 +397,17 @@ static inline enum AVCodecID ff_mov_get_lpcm_codec_id(int bps, int flags)
 
 #define MOV_ISMV_TTML_TAG MKTAG('d', 'f', 'x', 'p')
 #define MOV_MP4_TTML_TAG  MKTAG('s', 't', 'p', 'p')
+
+struct MP4TrackKindValueMapping {
+    int         disposition;
+    const char *value;
+};
+
+struct MP4TrackKindMapping {
+    const char   *scheme_uri;
+    const struct  MP4TrackKindValueMapping *value_maps;
+};
+
+extern const struct MP4TrackKindMapping ff_mov_track_kind_table[];
 
 #endif /* AVFORMAT_ISOM_H */

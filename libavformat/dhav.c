@@ -234,21 +234,24 @@ static int64_t get_duration(AVFormatContext *s)
     int64_t start_pos = avio_tell(s->pb);
     int64_t start = 0, end = 0;
     struct tm timeinfo;
+    int max_interations = 100000;
 
     if (!s->pb->seekable)
         return 0;
 
     avio_seek(s->pb, avio_size(s->pb) - 8, SEEK_SET);
-    if (avio_rl32(s->pb) == MKTAG('d','h','a','v')) {
-        int seek_back = avio_rl32(s->pb);
+    while (avio_tell(s->pb) > 12 && max_interations--) {
+        if (avio_rl32(s->pb) == MKTAG('d','h','a','v')) {
+            int seek_back = avio_rl32(s->pb);
 
-        avio_seek(s->pb, -seek_back, SEEK_CUR);
-        read_chunk(s);
-        get_timeinfo(dhav->date, &timeinfo);
-        end = av_timegm(&timeinfo) * 1000LL;
-    } else {
-        avio_seek(s->pb, start_pos, SEEK_SET);
-        return 0;
+            avio_seek(s->pb, -seek_back, SEEK_CUR);
+            read_chunk(s);
+            get_timeinfo(dhav->date, &timeinfo);
+            end = av_timegm(&timeinfo) * 1000LL;
+            break;
+        } else {
+            avio_seek(s->pb, -12, SEEK_CUR);
+        }
     }
 
     avio_seek(s->pb, start_pos, SEEK_SET);
@@ -439,10 +442,11 @@ static int dhav_read_seek(AVFormatContext *s, int stream_index,
 
     if (index < 0)
         return -1;
+    pts = sti->index_entries[index].timestamp;
+    if (pts < timestamp)
+        return AVERROR(EAGAIN);
     if (avio_seek(s->pb, sti->index_entries[index].pos, SEEK_SET) < 0)
         return -1;
-
-    pts = sti->index_entries[index].timestamp;
 
     for (int n = 0; n < s->nb_streams; n++) {
         AVStream *st = s->streams[n];
@@ -465,5 +469,5 @@ const AVInputFormat ff_dhav_demuxer = {
     .read_packet    = dhav_read_packet,
     .read_seek      = dhav_read_seek,
     .extensions     = "dav",
-    .flags          = AVFMT_GENERIC_INDEX | AVFMT_NO_BYTE_SEEK | AVFMT_TS_DISCONT | AVFMT_TS_NONSTRICT,
+    .flags          = AVFMT_GENERIC_INDEX | AVFMT_NO_BYTE_SEEK | AVFMT_TS_DISCONT | AVFMT_TS_NONSTRICT | AVFMT_SEEK_TO_PTS,
 };

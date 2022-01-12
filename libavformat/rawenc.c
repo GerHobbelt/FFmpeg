@@ -142,6 +142,20 @@ const AVOutputFormat ff_avs2_muxer = {
 };
 #endif
 
+#if CONFIG_AVS3_MUXER
+const AVOutputFormat ff_avs3_muxer = {
+    .name              = "avs3",
+    .long_name         = NULL_IF_CONFIG_SMALL("AVS3-P2/IEEE1857.10"),
+    .extensions        = "avs3",
+    .audio_codec       = AV_CODEC_ID_NONE,
+    .video_codec       = AV_CODEC_ID_AVS3,
+    .init              = force_one_stream,
+    .write_packet      = ff_raw_write_packet,
+    .flags             = AVFMT_NOTIMESTAMPS,
+};
+#endif
+
+
 #if CONFIG_CAVSVIDEO_MUXER
 const AVOutputFormat ff_cavsvideo_muxer = {
     .name              = "cavsvideo",
@@ -327,9 +341,9 @@ const AVOutputFormat ff_h263_muxer = {
 #endif
 
 #if CONFIG_H264_MUXER
-static int h264_check_bitstream(struct AVFormatContext *s, const AVPacket *pkt)
+static int h264_check_bitstream(AVFormatContext *s, AVStream *st,
+                                const AVPacket *pkt)
 {
-    AVStream *st = s->streams[0];
     if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
                           AV_RB24(pkt->data) != 0x000001)
         return ff_stream_add_bitstream_filter(st, "h264_mp4toannexb", NULL);
@@ -350,9 +364,9 @@ const AVOutputFormat ff_h264_muxer = {
 #endif
 
 #if CONFIG_HEVC_MUXER
-static int hevc_check_bitstream(struct AVFormatContext *s, const AVPacket *pkt)
+static int hevc_check_bitstream(AVFormatContext *s, AVStream *st,
+                                const AVPacket *pkt)
 {
-    AVStream *st = s->streams[0];
     if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
                           AV_RB24(pkt->data) != 0x000001)
         return ff_stream_add_bitstream_filter(st, "hevc_mp4toannexb", NULL);
@@ -454,9 +468,9 @@ const AVOutputFormat ff_mpeg2video_muxer = {
 #endif
 
 #if CONFIG_OBU_MUXER
-static int obu_check_bitstream(struct AVFormatContext *s, const AVPacket *pkt)
+static int obu_check_bitstream(AVFormatContext *s, AVStream *st,
+                               const AVPacket *pkt)
 {
-    AVStream *st = s->streams[0];
     return ff_stream_add_bitstream_filter(st, "av1_metadata", "td=insert");
 }
 

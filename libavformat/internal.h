@@ -25,6 +25,7 @@
 
 #include "libavcodec/avcodec.h"
 #include "libavcodec/bsf.h"
+#include "libavcodec/packet_internal.h"
 
 #include "avformat.h"
 #include "os_support.h"
@@ -82,12 +83,17 @@ typedef struct FFFormatContext {
     int nb_interleaved_streams;
 
     /**
+     * The interleavement function in use. Always set for muxers.
+     */
+    int (*interleave_packet)(struct AVFormatContext *s, AVPacket *pkt,
+                             int flush, int has_packet);
+
+    /**
      * This buffer is only needed when packets were already buffered but
      * not decoded, for example to get the codec parameters in MPEG
      * streams.
      */
-    struct PacketList *packet_buffer;
-    struct PacketList *packet_buffer_end;
+    PacketList packet_buffer;
 
     /* av_seek_frame() support */
     int64_t data_offset; /**< offset of the first packet */
@@ -98,16 +104,15 @@ typedef struct FFFormatContext {
      * be identified, as parsing cannot be done without knowing the
      * codec.
      */
-    struct PacketList *raw_packet_buffer;
-    struct PacketList *raw_packet_buffer_end;
+    PacketList raw_packet_buffer;
     /**
      * Packets split by the parser get queued here.
      */
-    struct PacketList *parse_queue;
-    struct PacketList *parse_queue_end;
+    PacketList parse_queue;
     /**
      * The generic code uses this as a temporary packet
-     * to parse packets; it may also be used for other means
+     * to parse packets or for muxing, especially flushing.
+     * For demuxers, it may also be used for other means
      * for short periods that are guaranteed not to overlap
      * with calls to av_read_frame() (or ff_read_packet())
      * or with each other.
@@ -120,14 +125,15 @@ typedef struct FFFormatContext {
     AVPacket *parse_pkt;
 
     /**
-     * Used to hold temporary packets.
+     * Used to hold temporary packets for the generic demuxing code.
+     * When muxing, it may be used by muxers to hold packets (even
+     * permanent ones).
      */
     AVPacket *pkt;
     /**
-     * Remaining size available for raw_packet_buffer, in bytes.
+     * Sum of the size of packets in raw_packet_buffer, in bytes.
      */
-#define RAW_PACKET_BUFFER_SIZE 2500000
-    int raw_packet_buffer_remaining_size;
+    int raw_packet_buffer_size;
 
     /**
      * Offset to remap timestamps to be non-negative.
@@ -385,7 +391,7 @@ typedef struct FFStream {
     /**
      * last packet in packet_buffer for this stream when muxing.
      */
-    struct PacketList *last_in_packet_buffer;
+    PacketListEntry *last_in_packet_buffer;
 
     int64_t last_IP_pts;
     int last_IP_duration;
@@ -476,6 +482,17 @@ void ff_flush_packet_queue(AVFormatContext *s);
  */
 int ff_mkdir_p(const char *path);
 
+/**
+ * Write hexadecimal string corresponding to given binary data. The string
+ * is zero-terminated.
+ *
+ * @param buf       the output string is written here;
+ *                  needs to be at least 2 * size + 1 bytes long.
+ * @param src       the input data to be transformed.
+ * @param size      the size (in byte) of src.
+ * @param lowercase determines whether to use the range [0-9a-f] or [0-9A-F].
+ * @return buf.
+ */
 char *ff_data_to_hex(char *buf, const uint8_t *src, int size, int lowercase);
 
 /**
@@ -537,10 +554,11 @@ uint64_t ff_parse_ntp_time(uint64_t ntp_ts);
  * @param ttl the time to live of the stream, 0 if not multicast
  * @param fmt the AVFormatContext, which might contain options modifying
  *            the generated SDP
+ * @return 0 on success, a negative error code on failure
  */
-void ff_sdp_write_media(char *buff, int size, AVStream *st, int idx,
-                        const char *dest_addr, const char *dest_type,
-                        int port, int ttl, AVFormatContext *fmt);
+int ff_sdp_write_media(char *buff, int size, const AVStream *st, int idx,
+                       const char *dest_addr, const char *dest_type,
+                       int port, int ttl, AVFormatContext *fmt);
 
 /**
  * Write a packet to another muxer than the one the user originally
@@ -611,7 +629,7 @@ void ff_parse_key_value(const char *str, ff_parse_key_val_cb callback_get_buf,
  * Find stream index based on format-specific stream ID
  * @return stream index, or < 0 on error
  */
-int ff_find_stream_index(AVFormatContext *s, int id);
+int ff_find_stream_index(const AVFormatContext *s, int id);
 
 /**
  * Internal version of av_index_search_timestamp
@@ -746,18 +764,17 @@ int ff_add_attached_pic(AVFormatContext *s, AVStream *st, AVIOContext *pb,
 
 /**
  * Interleave an AVPacket per dts so it can be muxed.
- *
- * @param s   an AVFormatContext for output. pkt resp. out will be added to
- *            resp. taken from its packet buffer.
- * @param out the interleaved packet will be output here
- * @param pkt the input packet; will be blank on return if not NULL
- * @param flush 1 if no further packets are available as input and all
- *              remaining packets should be output
- * @return 1 if a packet was output, 0 if no packet could be output
- *         (in which case out may be uninitialized), < 0 if an error occurred
+ * See the documentation of AVOutputFormat.interleave_packet for details.
  */
-int ff_interleave_packet_per_dts(AVFormatContext *s, AVPacket *out,
-                                 AVPacket *pkt, int flush);
+int ff_interleave_packet_per_dts(AVFormatContext *s, AVPacket *pkt,
+                                 int flush, int has_packet);
+
+/**
+ * Interleave packets directly in the order in which they arrive
+ * without any sort of buffering.
+ */
+int ff_interleave_packet_passthrough(AVFormatContext *s, AVPacket *pkt,
+                                     int flush, int has_packet);
 
 void ff_free_stream(AVFormatContext *s, AVStream *st);
 
@@ -821,6 +838,15 @@ int ff_stream_add_bitstream_filter(AVStream *st, const char *name, const char *a
  * @return >=0 on success, AVERROR code on error
  */
 int ff_stream_encode_params_copy(AVStream *dst, const AVStream *src);
+
+/**
+ * Copy side data from source to destination stream
+ *
+ * @param dst pointer to destination AVStream
+ * @param src pointer to source AVStream
+ * @return >=0 on success, AVERROR code on error
+ */
+int ff_stream_side_data_copy(AVStream *dst, const AVStream *src);
 
 /**
  * Wrap ffurl_move() and log if error happens.
@@ -898,8 +924,16 @@ int ff_format_output_open(AVFormatContext *s, const char *url, AVDictionary **op
 /*
  * A wrapper around AVFormatContext.io_close that should be used
  * instead of calling the pointer directly.
+ *
+ * @param s AVFormatContext
+ * @param *pb the AVIOContext to be closed and freed. Can be NULL.
+ * @return >=0 on success, negative AVERROR in case of failure
  */
-void ff_format_io_close(AVFormatContext *s, AVIOContext **pb);
+int ff_format_io_close(AVFormatContext *s, AVIOContext **pb);
+
+/* Default io_close callback, not to be used directly, use ff_format_io_close
+ * instead. */
+void ff_format_io_close_default(AVFormatContext *s, AVIOContext *pb);
 
 /**
  * Utility function to check if the file uses http or https protocol
@@ -982,5 +1016,12 @@ int ff_unlock_avformat(void);
 void ff_format_set_url(AVFormatContext *s, char *url);
 
 void avpriv_register_devices(const AVOutputFormat * const o[], const AVInputFormat * const i[]);
+
+/**
+ * Make shift_size amount of space at read_start by shifting data in the output
+ * at read_start until the current IO position. The underlying IO context must
+ * be seekable.
+ */
+int ff_format_shift_data(AVFormatContext *s, int64_t read_start, int shift_size);
 
 #endif /* AVFORMAT_INTERNAL_H */

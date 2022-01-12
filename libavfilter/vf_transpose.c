@@ -55,10 +55,10 @@ typedef struct TransContext {
 static int query_formats(AVFilterContext *ctx)
 {
     AVFilterFormats *pix_fmts = NULL;
+    const AVPixFmtDescriptor *desc;
     int fmt, ret;
 
-    for (fmt = 0; av_pix_fmt_desc_get(fmt); fmt++) {
-        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(fmt);
+    for (fmt = 0; desc = av_pix_fmt_desc_get(fmt); fmt++) {
         if (!(desc->flags & AV_PIX_FMT_FLAG_PAL ||
               desc->flags & AV_PIX_FMT_FLAG_HWACCEL ||
               desc->flags & AV_PIX_FMT_FLAG_BITSTREAM ||
@@ -328,6 +328,7 @@ static int filter_slice(AVFilterContext *ctx, void *arg, int jobnr,
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 {
+    int err = 0;
     AVFilterContext *ctx = inlink->dst;
     TransContext *s = ctx->priv;
     AVFilterLink *outlink = ctx->outputs[0];
@@ -339,10 +340,13 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     out = ff_get_video_buffer(outlink, outlink->w, outlink->h);
     if (!out) {
-        av_frame_free(&in);
-        return AVERROR(ENOMEM);
+        err = AVERROR(ENOMEM);
+        goto fail;
     }
-    av_frame_copy_props(out, in);
+
+    err = av_frame_copy_props(out, in);
+    if (err < 0)
+        goto fail;
 
     if (in->sample_aspect_ratio.num == 0) {
         out->sample_aspect_ratio = in->sample_aspect_ratio;
@@ -356,6 +360,11 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
                       FFMIN(outlink->h, ff_filter_get_nb_threads(ctx)));
     av_frame_free(&in);
     return ff_filter_frame(outlink, out);
+
+fail:
+    av_frame_free(&in);
+    av_frame_free(&out);
+    return err;
 }
 
 #define OFFSET(x) offsetof(TransContext, x)
@@ -401,8 +410,8 @@ const AVFilter ff_vf_transpose = {
     .description   = NULL_IF_CONFIG_SMALL("Transpose input video."),
     .priv_size     = sizeof(TransContext),
     .priv_class    = &transpose_class,
-    .query_formats = query_formats,
     FILTER_INPUTS(avfilter_vf_transpose_inputs),
     FILTER_OUTPUTS(avfilter_vf_transpose_outputs),
+    FILTER_QUERY_FUNC(query_formats),
     .flags         = AVFILTER_FLAG_SLICE_THREADS,
 };
