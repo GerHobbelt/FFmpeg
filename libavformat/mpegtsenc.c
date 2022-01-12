@@ -366,6 +366,12 @@ static int get_dvb_stream_type(AVFormatContext *s, AVStream *st)
     case AV_CODEC_ID_CAVS:
         stream_type = STREAM_TYPE_VIDEO_CAVS;
         break;
+    case AV_CODEC_ID_AVS2:
+        stream_type = STREAM_TYPE_VIDEO_AVS2;
+        break;
+    case AV_CODEC_ID_AVS3:
+        stream_type = STREAM_TYPE_VIDEO_AVS3;
+        break;
     case AV_CODEC_ID_DIRAC:
         stream_type = STREAM_TYPE_VIDEO_DIRAC;
         break;
@@ -783,6 +789,9 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
                 put_registration_descriptor(&q, MKTAG('V', 'C', '-', '1'));
             } else if (stream_type == STREAM_TYPE_VIDEO_HEVC && s->strict_std_compliance <= FF_COMPLIANCE_NORMAL) {
                 put_registration_descriptor(&q, MKTAG('H', 'E', 'V', 'C'));
+            } else if (stream_type == STREAM_TYPE_VIDEO_CAVS || stream_type == STREAM_TYPE_VIDEO_AVS2 ||
+                       stream_type == STREAM_TYPE_VIDEO_AVS3) {
+                put_registration_descriptor(&q, MKTAG('A', 'V', 'S', 'V'));
             }
             break;
         case AVMEDIA_TYPE_DATA:
@@ -1131,9 +1140,7 @@ static int mpegts_init(AVFormatContext *s)
     ts->nit.write_packet = section_write_packet;
     ts->nit.opaque       = s;
 
-    ts->pkt = av_packet_alloc();
-    if (!ts->pkt)
-        return AVERROR(ENOMEM);
+    ts->pkt = ffformatcontext(s)->pkt;
 
     /* assign pids to each stream */
     for (i = 0; i < s->nb_streams; i++) {
@@ -1555,7 +1562,8 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
             q = get_ts_payload_start(buf);
             ts_st->discontinuity = 0;
         }
-        if (key && is_start && pts != AV_NOPTS_VALUE) {
+        if (key && is_start && pts != AV_NOPTS_VALUE &&
+            !is_dvb_teletext /* adaptation+payload forbidden for teletext (ETSI EN 300 472 V1.3.1 4.1) */) {
             // set Random Access for key frames
             if (ts_st->pcr_period)
                 write_pcr = 1;
@@ -1843,12 +1851,12 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
     if (side_data)
         stream_id = side_data[0];
 
-    if (ts->copyts < 1) {
-        if (!ts->first_dts_checked && dts != AV_NOPTS_VALUE) {
-            ts->first_pcr += dts * 300;
-            ts->first_dts_checked = 1;
-        }
+    if (!ts->first_dts_checked && dts != AV_NOPTS_VALUE) {
+        ts->first_pcr += dts * 300;
+        ts->first_dts_checked = 1;
+    }
 
+    if (ts->copyts < 1) {
         if (pts != AV_NOPTS_VALUE)
             pts += delay;
         if (dts != AV_NOPTS_VALUE)
@@ -2176,8 +2184,6 @@ static void mpegts_deinit(AVFormatContext *s)
     MpegTSService *service;
     int i;
 
-    av_packet_free(&ts->pkt);
-
     for (i = 0; i < s->nb_streams; i++) {
         AVStream *st = s->streams[i];
         MpegTSWriteStream *ts_st = st->priv_data;
@@ -2198,10 +2204,10 @@ static void mpegts_deinit(AVFormatContext *s)
     av_freep(&ts->services);
 }
 
-static int mpegts_check_bitstream(struct AVFormatContext *s, const AVPacket *pkt)
+static int mpegts_check_bitstream(AVFormatContext *s, AVStream *st,
+                                  const AVPacket *pkt)
 {
     int ret = 1;
-    AVStream *st = s->streams[pkt->stream_index];
 
     if (st->codecpar->codec_id == AV_CODEC_ID_H264) {
         if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&

@@ -43,18 +43,18 @@ typedef struct BufferSinkContext {
     unsigned warning_limit;
 
     /* only used for video */
-    enum AVPixelFormat *pixel_fmts;           ///< list of accepted pixel formats, must be terminated with -1
+    enum AVPixelFormat *pixel_fmts;     ///< list of accepted pixel formats
     int pixel_fmts_size;
 
     /* only used for audio */
-    enum AVSampleFormat *sample_fmts;       ///< list of accepted sample formats, terminated by AV_SAMPLE_FMT_NONE
+    enum AVSampleFormat *sample_fmts;   ///< list of accepted sample formats
     int sample_fmts_size;
-    int64_t *channel_layouts;               ///< list of accepted channel layouts, terminated by -1
+    int64_t *channel_layouts;           ///< list of accepted channel layouts
     int channel_layouts_size;
-    int *channel_counts;                    ///< list of accepted channel counts, terminated by -1
+    int *channel_counts;                ///< list of accepted channel counts
     int channel_counts_size;
     int all_channel_counts;
-    int *sample_rates;                      ///< list of accepted sample rates, terminated by -1
+    int *sample_rates;                  ///< list of accepted sample rates
     int sample_rates_size;
 
     AVFrame *peeked_frame;
@@ -339,10 +339,10 @@ const AVFilter ff_vsink_buffer = {
     .priv_size     = sizeof(BufferSinkContext),
     .priv_class    = &buffersink_class,
     .init          = common_init,
-    .query_formats = vsink_query_formats,
     .activate      = activate,
     FILTER_INPUTS(avfilter_vsink_buffer_inputs),
     .outputs       = NULL,
+    FILTER_QUERY_FUNC(vsink_query_formats),
 };
 
 static const AVFilterPad avfilter_asink_abuffer_inputs[] = {
@@ -358,8 +358,8 @@ const AVFilter ff_asink_abuffer = {
     .priv_class    = &abuffersink_class,
     .priv_size     = sizeof(BufferSinkContext),
     .init          = common_init,
-    .query_formats = asink_query_formats,
     .activate      = activate,
     FILTER_INPUTS(avfilter_asink_abuffer_inputs),
     .outputs       = NULL,
+    FILTER_QUERY_FUNC(asink_query_formats),
 };

@@ -362,11 +362,12 @@ Ignore IO errors during open and write. Useful for long-duration runs with netwo
 
 @item lhls @var{lhls}
 Enable Low-latency HLS(LHLS). Adds #EXT-X-PREFETCH tag with current segment's URI.
-Apple doesn't have an official spec for LHLS. Meanwhile hls.js player folks are
-trying to standardize a open LHLS spec. The draft spec is available in https://github.com/video-dev/hlsjs-rfcs/blob/lhls-spec/proposals/0001-lhls.md
-This option will also try to comply with the above open spec, till Apple's spec officially supports it.
-Applicable only when @var{streaming} and @var{hls_playlist} options are enabled.
+hls.js player folks are trying to standardize an open LHLS spec. The draft spec is available in https://github.com/video-dev/hlsjs-rfcs/blob/lhls-spec/proposals/0001-lhls.md
+This option tries to comply with the above open spec.
+It enables @var{streaming} and @var{hls_playlist} options automatically.
 This is an experimental feature.
+
+Note: This is not Apple's version LHLS. See @url{https://datatracker.ietf.org/doc/html/draft-pantos-hls-rfc8216bis}
 
 @item ldash @var{ldash}
 Enable Low-latency Dash by constraining the presence and values of some elements.
@@ -798,6 +799,7 @@ were recently referenced in the playlist. Default value is 1, meaning segments o
 Set output format options using a :-separated list of key=value
 parameters. Values containing @code{:} special characters must be
 escaped.
+@code{hls_ts_options} is deprecated, use hls_segment_options instead of it..
 
 @item hls_start_number_source
 Start the playlist sequence number (@code{#EXT-X-MEDIA-SEQUENCE}) according to the specified source.
@@ -918,6 +920,10 @@ This example will create a directory hierarchy 2016/02/15 (if any of them do not
 produce the playlist, @file{out.m3u8}, and segment files:
 @file{2016/02/15/file-20160215-1455569023.ts}, @file{2016/02/15/file-20160215-1455569024.ts}, etc.
 
+@item hls_segment_options @var{options_list}
+Set output format options using a :-separated list of key=value
+parameters. Values containing @code{:} special characters must be
+escaped.
 
 @item hls_key_info_file @var{key_info_file}
 Use the information in @var{key_info_file} for segment encryption. The first

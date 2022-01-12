@@ -120,6 +120,22 @@ enum AVMediaType avfilter_pad_get_type(const AVFilterPad *pads, int pad_idx);
  */
 #define AVFILTER_FLAG_SLICE_THREADS         (1 << 2)
 /**
+ * The filter is a "metadata" filter - it does not modify the frame data in any
+ * way. It may only affect the metadata (i.e. those fields copied by
+ * av_frame_copy_props()).
+ *
+ * More precisely, this means:
+ * - video: the data of any frame output by the filter must be exactly equal to
+ *   some frame that is received on one of its inputs. Furthermore, all frames
+ *   produced on a given output must correspond to frames received on the same
+ *   input and their order must be unchanged. Note that the filter may still
+ *   drop or duplicate the frames.
+ * - audio: the data produced by the filter on any of its outputs (viewed e.g.
+ *   as an array of interleaved samples) must be exactly equal to the data
+ *   received by the filter on one of its inputs.
+ */
+#define AVFILTER_FLAG_METADATA_ONLY         (1 << 3)
+/**
  * Some filters support a generic "enable" expression option that can be used
  * to enable or disable a filter in the timeline. Filters supporting this
  * option have this flag set. When the enable expression is false, the default
@@ -203,12 +219,18 @@ typedef struct AVFilter {
     /**
      * The number of entries in the list of inputs.
      */
-    uint16_t nb_inputs;
+    uint8_t nb_inputs;
 
     /**
      * The number of entries in the list of outputs.
      */
-    uint16_t nb_outputs;
+    uint8_t nb_outputs;
+
+    /**
+     * This field determines the state of the formats union.
+     * It is an enum FilterFormatsState value.
+     */
+    uint8_t formats_state;
 
     /**
      * Filter pre-initialization function
@@ -274,28 +296,62 @@ typedef struct AVFilter {
     void (*uninit)(AVFilterContext *ctx);
 
     /**
-     * Query formats supported by the filter on its inputs and outputs.
-     *
-     * This callback is called after the filter is initialized (so the inputs
-     * and outputs are fixed), shortly before the format negotiation. This
-     * callback may be called more than once.
-     *
-     * This callback must set AVFilterLink.outcfg.formats on every input link and
-     * AVFilterLink.incfg.formats on every output link to a list of pixel/sample
-     * formats that the filter supports on that link. For audio links, this
-     * filter must also set @ref AVFilterLink.incfg.samplerates "in_samplerates" /
-     * @ref AVFilterLink.outcfg.samplerates "out_samplerates" and
-     * @ref AVFilterLink.incfg.channel_layouts "in_channel_layouts" /
-     * @ref AVFilterLink.outcfg.channel_layouts "out_channel_layouts" analogously.
-     *
-     * This callback may be NULL for filters with one input, in which case
-     * libavfilter assumes that it supports all input formats and preserves
-     * them on output.
-     *
-     * @return zero on success, a negative value corresponding to an
-     * AVERROR code otherwise
+     * The state of the following union is determined by formats_state.
+     * See the documentation of enum FilterFormatsState in internal.h.
      */
-    int (*query_formats)(AVFilterContext *);
+    union {
+        /**
+         * Query formats supported by the filter on its inputs and outputs.
+         *
+         * This callback is called after the filter is initialized (so the inputs
+         * and outputs are fixed), shortly before the format negotiation. This
+         * callback may be called more than once.
+         *
+         * This callback must set AVFilterLink.outcfg.formats on every input link
+         * and AVFilterLink.incfg.formats on every output link to a list of
+         * pixel/sample formats that the filter supports on that link. For audio
+         * links, this filter must also set @ref AVFilterLink.incfg.samplerates
+         * "in_samplerates" / @ref AVFilterLink.outcfg.samplerates "out_samplerates"
+         * and @ref AVFilterLink.incfg.channel_layouts "in_channel_layouts" /
+         * @ref AVFilterLink.outcfg.channel_layouts "out_channel_layouts" analogously.
+         *
+         * This callback must never be NULL if the union is in this state.
+         *
+         * @return zero on success, a negative value corresponding to an
+         * AVERROR code otherwise
+         */
+        int (*query_func)(AVFilterContext *);
+        /**
+         * A pointer to an array of admissible pixel formats delimited
+         * by AV_PIX_FMT_NONE. The generic code will use this list
+         * to indicate that this filter supports each of these pixel formats,
+         * provided that all inputs and outputs use the same pixel format.
+         *
+         * This list must never be NULL if the union is in this state.
+         * The type of all inputs and outputs of filters using this must
+         * be AVMEDIA_TYPE_VIDEO.
+         */
+        const enum AVPixelFormat *pixels_list;
+        /**
+         * Analogous to pixels, but delimited by AV_SAMPLE_FMT_NONE
+         * and restricted to filters that only have AVMEDIA_TYPE_AUDIO
+         * inputs and outputs.
+         *
+         * In addition to that the generic code will mark all inputs
+         * and all outputs as supporting all sample rates and every
+         * channel count and channel layout, as long as all inputs
+         * and outputs use the same sample rate and channel count/layout.
+         */
+        const enum AVSampleFormat *samples_list;
+        /**
+         * Equivalent to { pix_fmt, AV_PIX_FMT_NONE } as pixels_list.
+         */
+        enum AVPixelFormat  pix_fmt;
+        /**
+         * Equivalent to { sample_fmt, AV_SAMPLE_FMT_NONE } as samples_list.
+         */
+        enum AVSampleFormat sample_fmt;
+    } formats;
 
     int priv_size;      ///< size of private data to allocate for the filter
 

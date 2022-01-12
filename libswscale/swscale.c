@@ -329,7 +329,7 @@ static int swscale(SwsContext *c, const uint8_t *src[],
     ) {
         SwsContext *const ctx = c->parent ? c->parent : c;
         int cpu_flags = av_get_cpu_flags();
-        if (HAVE_MMXEXT && (cpu_flags & AV_CPU_FLAG_SSE2) &&
+        if (flags & SWS_PRINT_INFO && HAVE_MMXEXT && (cpu_flags & AV_CPU_FLAG_SSE2) &&
             !atomic_exchange_explicit(&ctx->stride_unaligned_warned,1, memory_order_relaxed)) {
             av_log(c, AV_LOG_WARNING, "Warning: data is not aligned! This can lead to a speed loss\n");
         }
@@ -1020,7 +1020,7 @@ static int scale_internal(SwsContext *c,
         int offset  = srcSliceY_internal;
         int slice_h = srcSliceH;
 
-        // for dst slice scaling, offset the src pointers to match the dst slice
+        // for dst slice scaling, offset the pointers to match the unscaled API
         if (scale_dst) {
             av_assert0(offset == 0);
             for (i = 0; i < 4 && src2[i]; i++) {
@@ -1028,12 +1028,20 @@ static int scale_internal(SwsContext *c,
                     break;
                 src2[i] += (dstSliceY >> ((i == 1 || i == 2) ? c->chrSrcVSubSample : 0)) * srcStride2[i];
             }
-            offset  = 0;
+
+            for (i = 0; i < 4 && dst2[i]; i++) {
+                if (!dst2[i] || (i > 0 && usePal(c->dstFormat)))
+                    break;
+                dst2[i] -= (dstSliceY >> ((i == 1 || i == 2) ? c->chrDstVSubSample : 0)) * dstStride2[i];
+            }
+            offset  = dstSliceY;
             slice_h = dstSliceH;
         }
 
         ret = c->convert_unscaled(c, src2, srcStride2, offset, slice_h,
                                   dst2, dstStride2);
+        if (scale_dst)
+            dst2[0] += dstSliceY * dstStride2[0];
     } else {
         ret = swscale(c, src2, srcStride2, srcSliceY_internal, srcSliceH,
                       dst2, dstStride2, dstSliceY, dstSliceH);
