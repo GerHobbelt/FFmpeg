@@ -102,9 +102,9 @@ ARG TAR_OPTS="--no-same-owner --extract --file"
 # bump: alsa after cd build && ./hashupdate Dockerfile ALSA $LATEST
 # bump: alsa link "Release" https://github.com/alsa-project/alsa-lib/releases/tag/v$LATEST
 # bump: alsa link "Source diff $CURRENT..$LATEST" https://github.com/alsa-project/alsa-lib/compare/v$CURRENT..v$LATEST
-ARG ALSA_VERSION=1.2.12
+ARG ALSA_VERSION=1.2.13
 ARG ALSA_URL="https://www.alsa-project.org/files/pub/lib/alsa-lib-$ALSA_VERSION.tar.bz2"
-ARG ALSA_SHA256=4868cd908627279da5a634f468701625be8cc251d84262c7e5b6a218391ad0d2
+ARG ALSA_SHA256=8c4ff37553cbe89618e187e4c779f71a9bb2a8b27b91f87ed40987cc9233d8f6
 RUN wget $WGET_OPTS -O alsa.tar.bz2 "$ALSA_URL"
 RUN echo "$ALSA_SHA256  alsa.tar.bz2" | sha256sum --status -c -
 RUN \
