@@ -900,7 +900,7 @@ RUN \
     --disable-gif && \
   make -j$(nproc) install
 
-# x264 only have a stable branch no tags and we checkout commit so no hash is needed
+# x264 only has a stable branch and no tags. No hash is needed, as We checkout out a commit.
 # bump: x264 /X264_VERSION=([[:xdigit:]]+)/ gitrefs:https://code.videolan.org/videolan/x264.git|re:#^refs/heads/stable$#|@commit
 # bump: x264 after cd build && ./hashupdate Dockerfile X264 $LATEST
 # bump: x264 link "Source diff $CURRENT..$LATEST" https://code.videolan.org/videolan/x264/-/compare/$CURRENT...$LATEST
