@@ -137,9 +137,10 @@ static void read_xing_toc(AVFormatContext *s, int64_t filesize, int64_t duration
     int fill_index = (mp3->usetoc || fast_seek) && duration > 0;
 
     if (!filesize &&
-        !(filesize = avio_size(s->pb))) {
+        (filesize = avio_size(s->pb)) <= 0) {
         av_log(s, AV_LOG_WARNING, "Cannot determine file size, skipping TOC table.\n");
         fill_index = 0;
+        filesize = 0;
     }
 
     for (i = 0; i < XING_TOC_COUNT; i++) {
@@ -584,7 +585,7 @@ static int mp3_seek(AVFormatContext *s, int stream_index, int64_t timestamp,
     if (best_pos < 0)
         return best_pos;
 
-    if (mp3->is_cbr && ie == &ie1 && mp3->frames) {
+    if (mp3->is_cbr && ie == &ie1 && mp3->frames && mp3->header_filesize > 0) {
         int frame_duration = av_rescale(st->duration, 1, mp3->frames);
         ie1.timestamp = frame_duration * av_rescale(best_pos - si->data_offset, mp3->frames, mp3->header_filesize);
     }
@@ -612,6 +613,7 @@ const FFInputFormat ff_mp3_demuxer = {
     .p.flags        = AVFMT_GENERIC_INDEX,
     .p.extensions   = "mp2,mp3,m2a,mpa", /* XXX: use probe */
     .p.priv_class   = &demuxer_class,
+    .p.mime_type    = "audio/mpeg",
     .read_probe     = mp3_read_probe,
     .read_header    = mp3_read_header,
     .read_packet    = mp3_read_packet,

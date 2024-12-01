@@ -129,7 +129,14 @@ static int fuzz_video_get_buffer(AVCodecContext *ctx, AVFrame *frame)
 
     frame->extended_data = frame->data;
     for (i = 0; i < 4 && size[i]; i++) {
-        frame->buf[i] = av_buffer_alloc(size[i]);
+        switch(ctx->codec_id) {
+        case AV_CODEC_ID_FFV1:
+            frame->buf[i] = av_buffer_alloc(size[i]);
+        break;
+        default:
+            frame->buf[i] = av_buffer_allocz(size[i]);
+        }
+
         if (!frame->buf[i])
             goto fail;
         frame->data[i] = frame->buf[i]->data;
@@ -278,9 +285,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_QPEG:        maxpixels  /= 256;   break;
     case AV_CODEC_ID_RKA:         maxsamples /= 1<<20; break;
     case AV_CODEC_ID_RSCC:        maxpixels  /= 256;   break;
-    case AV_CODEC_ID_RASC:        maxpixels  /= 16;    break;
+    case AV_CODEC_ID_RASC:        maxpixels  /= 256;   break;
     case AV_CODEC_ID_RTV1:        maxpixels  /= 16;    break;
-    case AV_CODEC_ID_RV30:        maxpixels  /= 16;    break;
+    case AV_CODEC_ID_RV30:        maxpixels  /= 256;   break;
     case AV_CODEC_ID_SANM:        maxpixels  /= 16;    break;
     case AV_CODEC_ID_SCPR:        maxpixels  /= 32;    break;
     case AV_CODEC_ID_SCREENPRESSO:maxpixels  /= 64;    break;
@@ -289,6 +296,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_SMACKAUDIO:  maxsamples /= 4096;  break;
     case AV_CODEC_ID_SMACKVIDEO:  maxpixels  /= 64;    break;
     case AV_CODEC_ID_SNOW:        maxpixels  /= 128;   break;
+    case AV_CODEC_ID_SRGC:        maxpixels  /= 128;   break;
     case AV_CODEC_ID_TARGA:       maxpixels  /= 128;   break;
     case AV_CODEC_ID_TAK:         maxsamples /= 1024;  break;
     case AV_CODEC_ID_TGV:         maxpixels  /= 32;    break;
