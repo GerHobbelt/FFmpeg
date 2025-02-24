@@ -1173,7 +1173,15 @@ static int parse_packet(AVFormatContext *s, AVPacket *pkt,
 
     if (!size && !flush && sti->parser->flags & PARSER_FLAG_COMPLETE_FRAMES) {
         // preserve 0-size sync packets
-        compute_pkt_fields(s, st, sti->parser, pkt, AV_NOPTS_VALUE, AV_NOPTS_VALUE);
+        compute_pkt_fields(s, st, sti->parser, pkt, pkt->dts, pkt->pts);
+
+        // Theora has valid 0-sized packets that need to be output
+        if (st->codecpar->codec_id == AV_CODEC_ID_THEORA) {
+            ret = avpriv_packet_list_put(&fci->parse_queue,
+                                         pkt, NULL, 0);
+            if (ret < 0)
+                goto fail;
+        }
     }
 
     while (size > 0 || (flush && got_output)) {
@@ -2810,7 +2818,7 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
                     av_packet_unref(pkt1);
                 break;
             }
-            if (pkt->duration > 0) {
+            if (pkt->duration > 0 && pkt->duration < INT64_MAX - sti->info->codec_info_duration) {
                 const int fields = sti->codec_desc && (sti->codec_desc->props & AV_CODEC_PROP_FIELDS);
                 if (avctx->codec_type == AVMEDIA_TYPE_SUBTITLE && pkt->pts != AV_NOPTS_VALUE && st->start_time != AV_NOPTS_VALUE && pkt->pts >= st->start_time
                     && (uint64_t)pkt->pts - st->start_time < INT64_MAX

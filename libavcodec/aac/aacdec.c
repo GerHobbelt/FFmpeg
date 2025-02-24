@@ -1109,6 +1109,8 @@ static av_cold int decode_close(AVCodecContext *avctx)
             AACUsacElemConfig *ec = &usac->elems[j];
             av_freep(&ec->ext.pl_data);
         }
+
+        av_channel_layout_uninit(&ac->oc[i].ch_layout);
     }
 
     for (int type = 0; type < FF_ARRAY_ELEMS(ac->che); type++) {
@@ -1745,6 +1747,7 @@ int ff_aac_decode_ics(AACDecContext *ac, SingleChannelElement *sce,
 
     return 0;
 fail:
+    memset(sce->sfo, 0, sizeof(sce->sfo));
     tns->present = 0;
     return ret;
 }

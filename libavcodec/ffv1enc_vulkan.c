@@ -58,10 +58,10 @@ typedef struct VulkanEncodeFFv1Context {
     AVFrame *frame;
 
     FFVulkanContext s;
-    FFVkQueueFamilyCtx qf;
+    AVVulkanDeviceQueueFamily *qf;
     FFVkExecPool exec_pool;
 
-    FFVkQueueFamilyCtx transfer_qf;
+    AVVulkanDeviceQueueFamily *transfer_qf;
     FFVkExecPool transfer_exec_pool;
 
     VkBufferCopy *buf_regions;
@@ -1468,7 +1468,7 @@ static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
     FFV1Context *f = &fv->ctx;
     FFVkSPIRVCompiler *spv;
 
-    if ((err = ff_ffv1_common_init(avctx)) < 0)
+    if ((err = ff_ffv1_common_init(avctx, f)) < 0)
         return err;
 
     if (f->ac == 1)
@@ -1540,8 +1540,14 @@ static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
         f->num_v_slices = fv->num_v_slices;
 
         if (f->num_h_slices <= 0 && f->num_v_slices <= 0) {
-            f->num_h_slices = 32;
-            f->num_v_slices = 32;
+            if (avctx->slices) {
+                err = ff_ffv1_encode_determine_slices(avctx);
+                if (err < 0)
+                    return err;
+            } else {
+                f->num_h_slices = 32;
+                f->num_v_slices = 32;
+            }
         } else if (f->num_h_slices && f->num_v_slices <= 0) {
             f->num_v_slices = 1024 / f->num_h_slices;
         } else if (f->num_v_slices && f->num_h_slices <= 0) {
@@ -1575,7 +1581,7 @@ static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
         if (f->version < 4) {
             av_log(avctx, AV_LOG_ERROR, "PCM coding only supported by version 4 (-level 4)\n");
             return AVERROR_INVALIDDATA;
-        } else if (f->ac != AC_RANGE_CUSTOM_TAB) {
+        } else if (f->ac == AC_GOLOMB_RICE) {
             av_log(avctx, AV_LOG_ERROR, "PCM coding requires range coding\n");
             return AVERROR_INVALIDDATA;
         }
@@ -1586,8 +1592,8 @@ static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
     if (err < 0)
         return err;
 
-    err = ff_vk_qf_init(&fv->s, &fv->qf, VK_QUEUE_COMPUTE_BIT);
-    if (err < 0) {
+    fv->qf = ff_vk_qf_find(&fv->s, VK_QUEUE_COMPUTE_BIT, 0);
+    if (!fv->qf) {
         av_log(avctx, AV_LOG_ERROR, "Device has no compute queues!\n");
         return err;
     }
@@ -1626,7 +1632,7 @@ static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
     }
 
     if (!fv->async_depth) {
-        fv->async_depth = FFMIN(fv->qf.nb_queues, FFMAX(max_heap_size / maxsize, 1));
+        fv->async_depth = FFMIN(fv->qf->num, FFMAX(max_heap_size / maxsize, 1));
         fv->async_depth = FFMAX(fv->async_depth, 1);
     }
 
@@ -1635,19 +1641,19 @@ static av_cold int vulkan_encode_ffv1_init(AVCodecContext *avctx)
            (fv->async_depth * maxsize) / (1024*1024),
            fv->async_depth);
 
-    err = ff_vk_exec_pool_init(&fv->s, &fv->qf, &fv->exec_pool,
+    err = ff_vk_exec_pool_init(&fv->s, fv->qf, &fv->exec_pool,
                                fv->async_depth,
                                0, 0, 0, NULL);
     if (err < 0)
         return err;
 
-    err = ff_vk_qf_init(&fv->s, &fv->transfer_qf, VK_QUEUE_TRANSFER_BIT);
-    if (err < 0) {
+    fv->transfer_qf = ff_vk_qf_find(&fv->s, VK_QUEUE_TRANSFER_BIT, 0);
+    if (!fv->transfer_qf) {
         av_log(avctx, AV_LOG_ERROR, "Device has no transfer queues!\n");
         return err;
     }
 
-    err = ff_vk_exec_pool_init(&fv->s, &fv->transfer_qf, &fv->transfer_exec_pool,
+    err = ff_vk_exec_pool_init(&fv->s, fv->transfer_qf, &fv->transfer_exec_pool,
                                1,
                                0, 0, 0, NULL);
     if (err < 0)
@@ -1792,10 +1798,18 @@ static const AVOption vulkan_encode_ffv1_options[] = {
             { .i64 = AC_RANGE_CUSTOM_TAB }, -2, 2, VE, .unit = "coder" },
         { "rice", "Golomb rice", 0, AV_OPT_TYPE_CONST,
             { .i64 = AC_GOLOMB_RICE }, INT_MIN, INT_MAX, VE, .unit = "coder" },
+        { "range_def", "Range with default table", 0, AV_OPT_TYPE_CONST,
+            { .i64 = AC_RANGE_DEFAULT_TAB_FORCE }, INT_MIN, INT_MAX, VE, .unit = "coder" },
         { "range_tab", "Range with custom table", 0, AV_OPT_TYPE_CONST,
             { .i64 = AC_RANGE_CUSTOM_TAB }, INT_MIN, INT_MAX, VE, .unit = "coder" },
     { "qtable", "Quantization table", OFFSET(ctx.qtable), AV_OPT_TYPE_INT,
-            { .i64 = -1 }, -1, 2, VE },
+            { .i64 = -1 }, -1, 2, VE , .unit = "qtable"},
+        { "default", NULL, 0, AV_OPT_TYPE_CONST,
+            { .i64 = QTABLE_DEFAULT }, INT_MIN, INT_MAX, VE, .unit = "qtable" },
+        { "8bit", NULL, 0, AV_OPT_TYPE_CONST,
+            { .i64 = QTABLE_8BIT }, INT_MIN, INT_MAX, VE, .unit = "qtable" },
+        { "greater8bit", NULL, 0, AV_OPT_TYPE_CONST,
+            { .i64 = QTABLE_GT8BIT }, INT_MIN, INT_MAX, VE, .unit = "qtable" },
 
     { "slices_h", "Number of horizontal slices", OFFSET(num_h_slices), AV_OPT_TYPE_INT,
             { .i64 = -1 }, -1, 1024, VE },

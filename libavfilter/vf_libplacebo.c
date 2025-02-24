@@ -20,6 +20,7 @@
 #include "libavutil/eval.h"
 #include "libavutil/fifo.h"
 #include "libavutil/file.h"
+#include "libavutil/frame.h"
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/parseutils.h"
@@ -817,7 +818,7 @@ static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
 /* Construct and emit an output frame for a given timestamp */
 static int output_frame(AVFilterContext *ctx, int64_t pts)
 {
-    int err = 0, ok, changed_csp;
+    int err = 0, ok, changed;
     LibplaceboContext *s = ctx->priv;
     pl_options opts = s->opts;
     AVFilterLink *outlink = ctx->outputs[0];
@@ -853,6 +854,7 @@ static int output_frame(AVFilterContext *ctx, int64_t pts)
          * output colorspace defaults */
         out->color_primaries = AVCOL_PRI_BT2020;
         out->color_trc = AVCOL_TRC_SMPTE2084;
+        changed |= AV_SIDE_DATA_PROP_COLOR_DEPENDENT;
     }
 
     if (s->color_trc >= 0)
@@ -860,21 +862,13 @@ static int output_frame(AVFilterContext *ctx, int64_t pts)
     if (s->color_primaries >= 0)
         out->color_primaries = s->color_primaries;
 
-    changed_csp = ref->colorspace      != out->colorspace     ||
-                  ref->color_range     != out->color_range    ||
-                  ref->color_trc       != out->color_trc      ||
-                  ref->color_primaries != out->color_primaries;
-
     /* Strip side data if no longer relevant */
-    if (changed_csp) {
-        av_frame_remove_side_data(out, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
-        av_frame_remove_side_data(out, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
-        av_frame_remove_side_data(out, AV_FRAME_DATA_ICC_PROFILE);
-    }
-    if (s->apply_dovi || changed_csp) {
-        av_frame_remove_side_data(out, AV_FRAME_DATA_DOVI_RPU_BUFFER);
-        av_frame_remove_side_data(out, AV_FRAME_DATA_DOVI_METADATA);
-    }
+    if (out->width != ref->width || out->height != ref->height)
+        changed |= AV_SIDE_DATA_PROP_SIZE_DEPENDENT;
+    if (ref->color_trc != out->color_trc || ref->color_primaries != out->color_primaries)
+        changed |= AV_SIDE_DATA_PROP_COLOR_DEPENDENT;
+    av_frame_side_data_remove_by_props(&out->side_data, &out->nb_side_data, changed);
+
     if (s->apply_filmgrain)
         av_frame_remove_side_data(out, AV_FRAME_DATA_FILM_GRAIN_PARAMS);
 
@@ -1207,7 +1201,7 @@ static int libplacebo_config_output(AVFilterLink *outlink)
 
     ff_scale_adjust_dimensions(inlink, &outlink->w, &outlink->h,
                                s->force_original_aspect_ratio,
-                               s->force_divisible_by);
+                               s->force_divisible_by, 1.f);
 
     if (s->normalize_sar || s->nb_inputs > 1) {
         /* SAR is normalized, or we have multiple inputs, set out to 1:1 */
@@ -1294,7 +1288,7 @@ static const AVOption libplacebo_options[] = {
     { "force_divisible_by", "enforce that the output resolution is divisible by a defined integer when force_original_aspect_ratio is used", OFFSET(force_divisible_by), AV_OPT_TYPE_INT, { .i64 = 1 }, 1, 256, STATIC },
     { "normalize_sar", "force SAR normalization to 1:1 by adjusting pos_x/y/w/h", OFFSET(normalize_sar), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, STATIC },
     { "pad_crop_ratio", "ratio between padding and cropping when normalizing SAR (0=pad, 1=crop)", OFFSET(pad_crop_ratio), AV_OPT_TYPE_FLOAT, {.dbl=0.0}, 0.0, 1.0, DYNAMIC },
-    { "fillcolor", "Background fill color", OFFSET(fillcolor), AV_OPT_TYPE_STRING, {.str = "black"}, .flags = DYNAMIC },
+    { "fillcolor", "Background fill color", OFFSET(fillcolor), AV_OPT_TYPE_STRING, {.str = "black@0"}, .flags = DYNAMIC },
     { "corner_rounding", "Corner rounding radius", OFFSET(corner_rounding), AV_OPT_TYPE_FLOAT, {.dbl = 0.0}, 0.0, 1.0, .flags = DYNAMIC },
     { "extra_opts", "Pass extra libplacebo-specific options using a :-separated list of key=value pairs", OFFSET(extra_opts), AV_OPT_TYPE_DICT, .flags = DYNAMIC },
 
@@ -1452,9 +1446,11 @@ static const AVFilterPad libplacebo_outputs[] = {
     },
 };
 
-const AVFilter ff_vf_libplacebo = {
-    .name           = "libplacebo",
-    .description    = NULL_IF_CONFIG_SMALL("Apply various GPU filters from libplacebo"),
+const FFFilter ff_vf_libplacebo = {
+    .p.name         = "libplacebo",
+    .p.description  = NULL_IF_CONFIG_SMALL("Apply various GPU filters from libplacebo"),
+    .p.priv_class   = &libplacebo_class,
+    .p.flags        = AVFILTER_FLAG_HWDEVICE | AVFILTER_FLAG_DYNAMIC_INPUTS,
     .priv_size      = sizeof(LibplaceboContext),
     .init           = &libplacebo_init,
     .uninit         = &libplacebo_uninit,
@@ -1462,7 +1458,5 @@ const AVFilter ff_vf_libplacebo = {
     .process_command = &libplacebo_process_command,
     FILTER_OUTPUTS(libplacebo_outputs),
     FILTER_QUERY_FUNC2(libplacebo_query_format),
-    .priv_class     = &libplacebo_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
-    .flags          = AVFILTER_FLAG_HWDEVICE | AVFILTER_FLAG_DYNAMIC_INPUTS,
 };

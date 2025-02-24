@@ -60,7 +60,7 @@ static int alloc_lines(SwsSlice *s, int size, int width)
         for (j = 0; j < n; ++j) {
             // chroma plane line U and V are expected to be contiguous in memory
             // by mmx vertical scaler code
-            s->plane[i].line[j] = av_malloc(size * 2 + 32);
+            s->plane[i].line[j] = av_mallocz(size * 2 + 32);
             if (!s->plane[i].line[j]) {
                 free_lines(s);
                 return AVERROR(ENOMEM);
@@ -194,14 +194,10 @@ static void fill_ones(SwsSlice *s, int n, int bpc)
     for (i = 0; i < 4; ++i) {
         size = s->plane[i].available_lines;
         for (j = 0; j < size; ++j) {
-            if (bpc == 16) {
+            if (bpc >= 16) {
                 end = (n>>1) + 1;
                 for (k = 0; k < end; ++k)
                     ((int32_t*)(s->plane[i].line[j]))[k] = 1<<18;
-            } else if (bpc == 32) {
-                end = (n>>2) + 1;
-                for (k = 0; k < end; ++k)
-                    ((int64_t*)(s->plane[i].line[j]))[k] = 1LL<<34;
             } else {
                 end = n + 1;
                 for (k = 0; k < end; ++k)

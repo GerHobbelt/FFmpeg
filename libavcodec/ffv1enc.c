@@ -199,7 +199,7 @@ static av_always_inline av_flatten void put_symbol_inline(RangeCoder *c,
     } while (0)
 
     if (v) {
-        const int a = FFABS(v);
+        const unsigned a = is_signed ? FFABS(v) : v;
         const int e = av_log2(a);
         put_rac(c, state + 0, 0);
         if (e <= 9) {
@@ -414,11 +414,13 @@ av_cold int ff_ffv1_write_extradata(AVCodecContext *avctx)
     ff_build_rac_states(&c, 0.05 * (1LL << 32), 256 - 8);
 
     put_symbol(&c, state, f->version, 0);
+    f->combined_version = f->version << 16;
     if (f->version > 2) {
         if (f->version == 3) {
             f->micro_version = 4;
         } else if (f->version == 4)
             f->micro_version = 3;
+        f->combined_version += f->micro_version;
         put_symbol(&c, state, f->micro_version, 0);
     }
 
@@ -516,7 +518,7 @@ static int sort_stt(FFV1Context *s, uint8_t stt[256])
 }
 
 
-static int encode_determine_slices(AVCodecContext *avctx)
+int ff_ffv1_encode_determine_slices(AVCodecContext *avctx)
 {
     FFV1Context *s = avctx->priv_data;
     int plane_count = 1 + 2*s->chroma_planes + s->transparency;
@@ -892,7 +894,7 @@ static int encode_init_internal(AVCodecContext *avctx)
     int ret;
     FFV1Context *s = avctx->priv_data;
 
-    if ((ret = ff_ffv1_common_init(avctx)) < 0)
+    if ((ret = ff_ffv1_common_init(avctx, s)) < 0)
         return ret;
 
     if (s->ac == 1) // Compatbility with common command line usage
@@ -912,14 +914,13 @@ static int encode_init_internal(AVCodecContext *avctx)
         }
     }
 
-    s->version = 0;
 
     ret = ff_ffv1_encode_init(avctx);
     if (ret < 0)
         return ret;
 
     if (s->version > 1) {
-        if ((ret = encode_determine_slices(avctx)) < 0)
+        if ((ret = ff_ffv1_encode_determine_slices(avctx)) < 0)
             return ret;
 
         if ((ret = ff_ffv1_write_extradata(avctx)) < 0)
@@ -1045,6 +1046,10 @@ static void choose_rct_params(const FFV1Context *f, FFV1SliceContext *sc,
                 r = p[0];
                 g = p[1];
                 b = p[2];
+            } else if (f->use32bit || transparency) {
+                g = *((const uint16_t *)(src[0] + x*2 + stride[0]*y));
+                b = *((const uint16_t *)(src[1] + x*2 + stride[1]*y));
+                r = *((const uint16_t *)(src[2] + x*2 + stride[2]*y));
             } else {
                 b = *((const uint16_t*)(src[0] + x*2 + stride[0]*y));
                 g = *((const uint16_t*)(src[1] + x*2 + stride[1]*y));
@@ -1329,6 +1334,16 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     return 0;
 }
 
+static av_cold int encode_close(AVCodecContext *avctx)
+{
+    FFV1Context *const s = avctx->priv_data;
+
+    av_freep(&avctx->stats_out);
+    ff_ffv1_close(s);
+
+    return 0;
+}
+
 #define OFFSET(x) offsetof(FFV1Context, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
@@ -1346,7 +1361,13 @@ static const AVOption options[] = {
     { "context", "Context model", OFFSET(context_model), AV_OPT_TYPE_INT,
             { .i64 = 0 }, 0, 1, VE },
     { "qtable", "Quantization table", OFFSET(qtable), AV_OPT_TYPE_INT,
-            { .i64 = -1 }, -1, 2, VE },
+            { .i64 = -1 }, -1, 2, VE , .unit = "qtable"},
+        { "default", NULL, 0, AV_OPT_TYPE_CONST,
+            { .i64 = QTABLE_DEFAULT }, INT_MIN, INT_MAX, VE, .unit = "qtable" },
+        { "8bit", NULL, 0, AV_OPT_TYPE_CONST,
+            { .i64 = QTABLE_8BIT }, INT_MIN, INT_MAX, VE, .unit = "qtable" },
+        { "greater8bit", NULL, 0, AV_OPT_TYPE_CONST,
+            { .i64 = QTABLE_GT8BIT }, INT_MIN, INT_MAX, VE, .unit = "qtable" },
 
     { NULL }
 };
@@ -1369,7 +1390,7 @@ const FFCodec ff_ffv1_encoder = {
     .priv_data_size = sizeof(FFV1Context),
     .init           = encode_init_internal,
     FF_CODEC_ENCODE_CB(encode_frame),
-    .close          = ff_ffv1_close,
+    .close          = encode_close,
     .p.pix_fmts     = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_YUV420P,   AV_PIX_FMT_YUVA420P,  AV_PIX_FMT_YUVA422P,  AV_PIX_FMT_YUV444P,
         AV_PIX_FMT_YUVA444P,  AV_PIX_FMT_YUV440P,   AV_PIX_FMT_YUV422P,   AV_PIX_FMT_YUV411P,

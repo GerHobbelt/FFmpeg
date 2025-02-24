@@ -156,75 +156,98 @@ static void hScale8To19_c(SwsInternal *c, int16_t *_dst, int dstW,
 
 // FIXME all pal and rgb srcFormats could do this conversion as well
 // FIXME all scalers more complex than bilinear could do half of this transform
-static void chrRangeToJpeg_c(int16_t *dstU, int16_t *dstV, int width)
+static void chrRangeToJpeg_c(int16_t *dstU, int16_t *dstV, int width,
+                             uint32_t _coeff, int64_t _offset)
 {
+    uint16_t coeff = _coeff;
+    int32_t offset = _offset;
     int i;
     for (i = 0; i < width; i++) {
-        dstU[i] = (FFMIN(dstU[i], 30775) * 4663 - 9289992) >> 12; // -264
-        dstV[i] = (FFMIN(dstV[i], 30775) * 4663 - 9289992) >> 12; // -264
+        int U = (dstU[i] * coeff + offset) >> 14;
+        int V = (dstV[i] * coeff + offset) >> 14;
+        dstU[i] = FFMIN(U, (1 << 15) - 1);
+        dstV[i] = FFMIN(V, (1 << 15) - 1);
     }
 }
 
-static void chrRangeFromJpeg_c(int16_t *dstU, int16_t *dstV, int width)
+static void chrRangeFromJpeg_c(int16_t *dstU, int16_t *dstV, int width,
+                               uint32_t _coeff, int64_t _offset)
 {
+    uint16_t coeff = _coeff;
+    int32_t offset = _offset;
     int i;
     for (i = 0; i < width; i++) {
-        dstU[i] = (dstU[i] * 1799 + 4081085) >> 11; // 1469
-        dstV[i] = (dstV[i] * 1799 + 4081085) >> 11; // 1469
+        dstU[i] = (dstU[i] * coeff + offset) >> 14;
+        dstV[i] = (dstV[i] * coeff + offset) >> 14;
     }
 }
 
-static void lumRangeToJpeg_c(int16_t *dst, int width)
+static void lumRangeToJpeg_c(int16_t *dst, int width,
+                             uint32_t _coeff, int64_t _offset)
 {
+    uint16_t coeff = _coeff;
+    int32_t offset = _offset;
     int i;
-    for (i = 0; i < width; i++)
-        dst[i] = (FFMIN(dst[i], 30189) * 19077 - 39057361) >> 14;
+    for (i = 0; i < width; i++) {
+        int Y = (dst[i] * coeff + offset) >> 14;
+        dst[i] = FFMIN(Y, (1 << 15) - 1);
+    }
 }
 
-static void lumRangeFromJpeg_c(int16_t *dst, int width)
+static void lumRangeFromJpeg_c(int16_t *dst, int width,
+                               uint32_t _coeff, int64_t _offset)
 {
+    uint16_t coeff = _coeff;
+    int32_t offset = _offset;
     int i;
     for (i = 0; i < width; i++)
-        dst[i] = (dst[i] * 14071 + 33561947) >> 14;
+        dst[i] = (dst[i] * coeff + offset) >> 14;
 }
 
-static void chrRangeToJpeg16_c(int16_t *_dstU, int16_t *_dstV, int width)
+static void chrRangeToJpeg16_c(int16_t *_dstU, int16_t *_dstV, int width,
+                               uint32_t coeff, int64_t offset)
 {
     int i;
     int32_t *dstU = (int32_t *) _dstU;
     int32_t *dstV = (int32_t *) _dstV;
     for (i = 0; i < width; i++) {
-        dstU[i] = ((int)(FFMIN(dstU[i], 30775 << 4) * 4663U - (9289992 << 4))) >> 12; // -264
-        dstV[i] = ((int)(FFMIN(dstV[i], 30775 << 4) * 4663U - (9289992 << 4))) >> 12; // -264
+        int U = ((int64_t) dstU[i] * coeff + offset) >> 18;
+        int V = ((int64_t) dstV[i] * coeff + offset) >> 18;
+        dstU[i] = FFMIN(U, (1 << 19) - 1);
+        dstV[i] = FFMIN(V, (1 << 19) - 1);
     }
 }
 
-static void chrRangeFromJpeg16_c(int16_t *_dstU, int16_t *_dstV, int width)
+static void chrRangeFromJpeg16_c(int16_t *_dstU, int16_t *_dstV, int width,
+                                 uint32_t coeff, int64_t offset)
 {
     int i;
     int32_t *dstU = (int32_t *) _dstU;
     int32_t *dstV = (int32_t *) _dstV;
     for (i = 0; i < width; i++) {
-        dstU[i] = (dstU[i] * 1799 + (4081085 << 4)) >> 11; // 1469
-        dstV[i] = (dstV[i] * 1799 + (4081085 << 4)) >> 11; // 1469
+        dstU[i] = ((int64_t) dstU[i] * coeff + offset) >> 18;
+        dstV[i] = ((int64_t) dstV[i] * coeff + offset) >> 18;
     }
 }
 
-static void lumRangeToJpeg16_c(int16_t *_dst, int width)
+static void lumRangeToJpeg16_c(int16_t *_dst, int width,
+                               uint32_t coeff, int64_t offset)
 {
     int i;
     int32_t *dst = (int32_t *) _dst;
     for (i = 0; i < width; i++) {
-        dst[i] = ((int)(FFMIN(dst[i], 30189 << 4) * 4769U - (39057361 << 2))) >> 12;
+        int Y = ((int64_t) dst[i] * coeff + offset) >> 18;
+        dst[i] = FFMIN(Y, (1 << 19) - 1);
     }
 }
 
-static void lumRangeFromJpeg16_c(int16_t *_dst, int width)
+static void lumRangeFromJpeg16_c(int16_t *_dst, int width,
+                                 uint32_t coeff, int64_t offset)
 {
     int i;
     int32_t *dst = (int32_t *) _dst;
     for (i = 0; i < width; i++)
-        dst[i] = ((int)(dst[i]*(14071U/4) + (33561947<<4)/4)) >> 12;
+        dst[i] = ((int64_t) dst[i] * coeff + offset) >> 18;
 }
 
 
@@ -540,11 +563,68 @@ int ff_swscale(SwsInternal *c, const uint8_t *const src[], const int srcStride[]
     return dstY - lastDstY;
 }
 
+/*
+ * Solve for coeff and offset:
+ * dst = ((src << src_shift) * coeff + offset) >> (mult_shift + src_shift)
+ *
+ * If SwsInternal->dstBpc is > 14, coeff is uint16_t and offset is int32_t,
+ * otherwise (SwsInternal->dstBpc is <= 14) coeff is uint32_t and offset is
+ * int64_t.
+ */
+static void solve_range_convert(uint16_t src_min, uint16_t src_max,
+                                uint16_t dst_min, uint16_t dst_max,
+                                int src_bits, int src_shift, int mult_shift,
+                                uint32_t *coeff, int64_t *offset)
+{
+    uint16_t src_range = src_max - src_min;
+    uint16_t dst_range = dst_max - dst_min;
+    int total_shift = mult_shift + src_shift;
+    *coeff = AV_CEIL_RSHIFT(((uint64_t) dst_range << total_shift) / src_range, src_shift);
+    *offset = ((int64_t) dst_max << total_shift) -
+              ((int64_t) src_max << src_shift) * *coeff;
+}
+
+static void init_range_convert_constants(SwsInternal *c)
+{
+    const int bit_depth = c->dstBpc ? c->dstBpc : 8;
+    const int src_bits = bit_depth <= 14 ? 15 : 19;
+    const int src_shift = src_bits - bit_depth;
+    const int mult_shift = bit_depth <= 14 ? 14 : 18;
+    const uint16_t mpeg_min = 16U << (bit_depth - 8);
+    const uint16_t mpeg_max_lum = 235U << (bit_depth - 8);
+    const uint16_t mpeg_max_chr = 240U << (bit_depth - 8);
+    const uint16_t jpeg_max = (1U << bit_depth) - 1;
+    uint16_t src_min, src_max_lum, src_max_chr;
+    uint16_t dst_min, dst_max_lum, dst_max_chr;
+    if (c->opts.src_range) {
+        src_min     = 0;
+        src_max_lum = jpeg_max;
+        src_max_chr = jpeg_max;
+        dst_min     = mpeg_min;
+        dst_max_lum = mpeg_max_lum;
+        dst_max_chr = mpeg_max_chr;
+    } else {
+        src_min     = mpeg_min;
+        src_max_lum = mpeg_max_lum;
+        src_max_chr = mpeg_max_chr;
+        dst_min     = 0;
+        dst_max_lum = jpeg_max;
+        dst_max_chr = jpeg_max;
+    }
+    solve_range_convert(src_min, src_max_lum, dst_min, dst_max_lum,
+                        src_bits, src_shift, mult_shift,
+                        &c->lumConvertRange_coeff, &c->lumConvertRange_offset);
+    solve_range_convert(src_min, src_max_chr, dst_min, dst_max_chr,
+                        src_bits, src_shift, mult_shift,
+                        &c->chrConvertRange_coeff, &c->chrConvertRange_offset);
+}
+
 av_cold void ff_sws_init_range_convert(SwsInternal *c)
 {
     c->lumConvertRange = NULL;
     c->chrConvertRange = NULL;
     if (c->opts.src_range != c->opts.dst_range && !isAnyRGB(c->opts.dst_format)) {
+        init_range_convert_constants(c);
         if (c->dstBpc <= 14) {
             if (c->opts.src_range) {
                 c->lumConvertRange = lumRangeFromJpeg_c;
@@ -693,10 +773,10 @@ void ff_xyz12Torgb48(const SwsInternal *c, uint8_t *dst, int dst_stride,
                 c->xyz2rgb_matrix[2][1] * y +
                 c->xyz2rgb_matrix[2][2] * z >> 12;
 
-            // limit values to 12-bit depth
-            r = av_clip_uintp2(r, 12);
-            g = av_clip_uintp2(g, 12);
-            b = av_clip_uintp2(b, 12);
+            // limit values to 16-bit depth
+            r = av_clip_uint16(r);
+            g = av_clip_uint16(g);
+            b = av_clip_uint16(b);
 
             // convert from sRGBlinear to RGB and scale from 12bit to 16bit
             if (desc->flags & AV_PIX_FMT_FLAG_BE) {
@@ -752,10 +832,10 @@ void ff_rgb48Toxyz12(const SwsInternal *c, uint8_t *dst, int dst_stride,
                 c->rgb2xyz_matrix[2][1] * g +
                 c->rgb2xyz_matrix[2][2] * b >> 12;
 
-            // limit values to 12-bit depth
-            x = av_clip_uintp2(x, 12);
-            y = av_clip_uintp2(y, 12);
-            z = av_clip_uintp2(z, 12);
+            // limit values to 16-bit depth
+            x = av_clip_uint16(x);
+            y = av_clip_uint16(y);
+            z = av_clip_uint16(z);
 
             // convert from XYZlinear to X'Y'Z' and scale from 12bit to 16bit
             if (desc->flags & AV_PIX_FMT_FLAG_BE) {
@@ -838,6 +918,14 @@ void ff_update_palette(SwsInternal *c, const uint32_t *pal)
         case AV_PIX_FMT_RGB24:
 #endif
             c->pal_rgb[i]= a + (b<<8) + (g<<16) + ((unsigned)r<<24);
+            break;
+        case AV_PIX_FMT_GBRP:
+        case AV_PIX_FMT_GBRAP:
+#if HAVE_BIGENDIAN
+            c->pal_rgb[i]= a + (r<<8) + (b<<16) + ((unsigned)g<<24);
+#else
+            c->pal_rgb[i]= g + (b<<8) + (r<<16) + ((unsigned)a<<24);
+#endif
             break;
         case AV_PIX_FMT_RGB32:
 #if !HAVE_BIGENDIAN
@@ -1315,7 +1403,7 @@ int sws_scale_frame(SwsContext *sws, AVFrame *dst, const AVFrame *src)
             int dst_linesize[4], src_linesize[4];
             get_frame_pointers(dst, dst_data, dst_linesize, field);
             get_frame_pointers(src, src_data, src_linesize, field);
-            sws_graph_run(graph, dst_data, dst_linesize,
+            ff_sws_graph_run(graph, dst_data, dst_linesize,
                           (const uint8_t **) src_data, src_linesize);
             if (!graph->dst.interlaced)
                 break;
@@ -1354,6 +1442,7 @@ int sws_frame_setup(SwsContext *ctx, const AVFrame *dst, const AVFrame *src)
     for (int field = 0; field < 2; field++) {
         SwsFormat src_fmt = ff_fmt_from_frame(src, field);
         SwsFormat dst_fmt = ff_fmt_from_frame(dst, field);
+        int src_ok, dst_ok;
 
         if ((src->flags ^ dst->flags) & AV_FRAME_FLAG_INTERLACED) {
             err_msg = "Cannot convert interlaced to progressive frames or vice versa.\n";
@@ -1361,29 +1450,15 @@ int sws_frame_setup(SwsContext *ctx, const AVFrame *dst, const AVFrame *src)
             goto fail;
         }
 
-        /* TODO: remove once implemented */
-        if ((dst_fmt.prim != src_fmt.prim || dst_fmt.trc != src_fmt.trc) &&
-            !s->color_conversion_warned)
-        {
-            av_log(ctx, AV_LOG_WARNING, "Conversions between different primaries / "
-                   "transfer functions are not currently implemented, expect "
-                   "wrong results.\n");
-            s->color_conversion_warned = 1;
-        }
-
-        if (!ff_test_fmt(&src_fmt, 0)) {
-            err_msg = "Unsupported input";
+        src_ok = ff_test_fmt(&src_fmt, 0);
+        dst_ok = ff_test_fmt(&dst_fmt, 1);
+        if ((!src_ok || !dst_ok) && !ff_props_equal(&src_fmt, &dst_fmt)) {
+            err_msg = src_ok ? "Unsupported output" : "Unsupported input";
             ret = AVERROR(ENOTSUP);
             goto fail;
         }
 
-        if (!ff_test_fmt(&dst_fmt, 1)) {
-            err_msg = "Unsupported output";
-            ret = AVERROR(ENOTSUP);
-            goto fail;
-        }
-
-        ret = sws_graph_reinit(ctx, &dst_fmt, &src_fmt, field, &s->graph[field]);
+        ret = ff_sws_graph_reinit(ctx, &dst_fmt, &src_fmt, field, &s->graph[field]);
         if (ret < 0) {
             err_msg = "Failed initializing scaling graph";
             goto fail;
@@ -1396,7 +1471,7 @@ int sws_frame_setup(SwsContext *ctx, const AVFrame *dst, const AVFrame *src)
         }
 
         if (!src_fmt.interlaced) {
-            sws_graph_free(&s->graph[FIELD_BOTTOM]);
+            ff_sws_graph_free(&s->graph[FIELD_BOTTOM]);
             break;
         }
 
@@ -1407,12 +1482,12 @@ int sws_frame_setup(SwsContext *ctx, const AVFrame *dst, const AVFrame *src)
                                           " fmt:%s csp:%s prim:%s trc:%s\n",
                err_msg, av_err2str(ret),
                av_get_pix_fmt_name(src_fmt.format), av_color_space_name(src_fmt.csp),
-               av_color_primaries_name(src_fmt.prim), av_color_transfer_name(src_fmt.trc),
+               av_color_primaries_name(src_fmt.color.prim), av_color_transfer_name(src_fmt.color.trc),
                av_get_pix_fmt_name(dst_fmt.format), av_color_space_name(dst_fmt.csp),
-               av_color_primaries_name(dst_fmt.prim), av_color_transfer_name(dst_fmt.trc));
+               av_color_primaries_name(dst_fmt.color.prim), av_color_transfer_name(dst_fmt.color.trc));
 
         for (int i = 0; i < FF_ARRAY_ELEMS(s->graph); i++)
-            sws_graph_free(&s->graph[i]);
+            ff_sws_graph_free(&s->graph[i]);
 
         return ret;
     }

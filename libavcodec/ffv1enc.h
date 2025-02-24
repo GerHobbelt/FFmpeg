@@ -25,7 +25,14 @@
 
 #include "avcodec.h"
 
+enum {
+    QTABLE_DEFAULT = -1,
+    QTABLE_8BIT,
+    QTABLE_GT8BIT,
+};
+
 av_cold int ff_ffv1_encode_init(AVCodecContext *avctx);
+av_cold int ff_ffv1_encode_determine_slices(AVCodecContext *avctx);
 av_cold int ff_ffv1_write_extradata(AVCodecContext *avctx);
 av_cold int ff_ffv1_encode_setup_plane_info(AVCodecContext *avctx,
                                             enum AVPixelFormat pix_fmt);

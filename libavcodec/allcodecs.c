@@ -29,6 +29,7 @@
 
 #include "config.h"
 #include "libavutil/thread.h"
+#include "avcodec.h"
 #include "codec.h"
 #include "codec_id.h"
 #include "codec_internal.h"
@@ -686,6 +687,7 @@ extern const FFCodec ff_adpcm_ima_wav_encoder;
 extern const FFCodec ff_adpcm_ima_wav_decoder;
 extern const FFCodec ff_adpcm_ima_ws_encoder;
 extern const FFCodec ff_adpcm_ima_ws_decoder;
+extern const FFCodec ff_adpcm_ima_xbox_decoder;
 extern const FFCodec ff_adpcm_ms_encoder;
 extern const FFCodec ff_adpcm_ms_decoder;
 extern const FFCodec ff_adpcm_mtaf_decoder;
@@ -777,6 +779,8 @@ extern const FFCodec ff_libgsm_ms_encoder;
 extern const FFCodec ff_libgsm_ms_decoder;
 extern const FFCodec ff_libilbc_encoder;
 extern const FFCodec ff_libilbc_decoder;
+extern const FFCodec ff_libjxl_anim_decoder;
+extern const FFCodec ff_libjxl_anim_encoder;
 extern const FFCodec ff_libjxl_decoder;
 extern const FFCodec ff_libjxl_encoder;
 extern const FFCodec ff_liblc3_encoder;
@@ -842,11 +846,13 @@ extern const FFCodec ff_av1_nvenc_encoder;
 extern const FFCodec ff_av1_qsv_decoder;
 extern const FFCodec ff_av1_qsv_encoder;
 extern const FFCodec ff_av1_amf_encoder;
+extern const FFCodec ff_av1_amf_decoder;
 extern const FFCodec ff_av1_mf_encoder;
 extern const FFCodec ff_av1_vaapi_encoder;
 extern const FFCodec ff_libopenh264_encoder;
 extern const FFCodec ff_libopenh264_decoder;
 extern const FFCodec ff_h264_amf_encoder;
+extern const FFCodec ff_h264_amf_decoder;
 extern const FFCodec ff_h264_cuvid_decoder;
 extern const FFCodec ff_h264_mf_encoder;
 extern const FFCodec ff_h264_nvenc_encoder;
@@ -857,6 +863,7 @@ extern const FFCodec ff_h264_vaapi_encoder;
 extern const FFCodec ff_h264_videotoolbox_encoder;
 extern const FFCodec ff_h264_vulkan_encoder;
 extern const FFCodec ff_hevc_amf_encoder;
+extern const FFCodec ff_hevc_amf_decoder;
 extern const FFCodec ff_hevc_cuvid_decoder;
 extern const FFCodec ff_hevc_d3d12va_encoder;
 extern const FFCodec ff_hevc_mediacodec_decoder;

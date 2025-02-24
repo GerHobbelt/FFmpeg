@@ -547,10 +547,10 @@ struct SwsInternal {
 /* pre defined color-spaces gamma */
 #define XYZ_GAMMA (2.6f)
 #define RGB_GAMMA (2.2f)
-    int16_t *xyzgamma;
-    int16_t *rgbgamma;
-    int16_t *xyzgammainv;
-    int16_t *rgbgammainv;
+    uint16_t *xyzgamma;
+    uint16_t *rgbgamma;
+    uint16_t *xyzgammainv;
+    uint16_t *rgbgammainv;
     int16_t xyz2rgb_matrix[3][4];
     int16_t rgb2xyz_matrix[3][4];
 
@@ -647,10 +647,28 @@ struct SwsInternal {
                     const int32_t *filterPos, int filterSize);
     /** @} */
 
-    /// Color range conversion function for luma plane if needed.
-    void (*lumConvertRange)(int16_t *dst, int width);
-    /// Color range conversion function for chroma planes if needed.
-    void (*chrConvertRange)(int16_t *dst1, int16_t *dst2, int width);
+    /**
+     * Color range conversion functions if needed.
+     * If SwsInternal->dstBpc is > 14:
+     * - int16_t *dst (data is 15 bpc)
+     * - uint16_t coeff
+     * - int32_t offset
+     * Otherwise (SwsInternal->dstBpc is <= 14):
+     * - int32_t *dst (data is 19 bpc)
+     * - uint32_t coeff
+     * - int64_t offset
+     */
+    /** @{ */
+    void (*lumConvertRange)(int16_t *dst, int width,
+                            uint32_t coeff, int64_t offset);
+    void (*chrConvertRange)(int16_t *dst1, int16_t *dst2, int width,
+                            uint32_t coeff, int64_t offset);
+    /** @} */
+
+    uint32_t lumConvertRange_coeff;
+    uint32_t chrConvertRange_coeff;
+    int64_t  lumConvertRange_offset;
+    int64_t  chrConvertRange_offset;
 
     int needs_hcscale; ///< Set if there are chroma planes to be converted.
 
@@ -681,7 +699,7 @@ static_assert(offsetof(SwsInternal, redDither) + DITHER32_INT == offsetof(SwsInt
 #if ARCH_X86_64
 /* x86 yuv2gbrp uses the SwsInternal for yuv coefficients
    if struct offsets change the asm needs to be updated too */
-static_assert(offsetof(SwsInternal, yuv2rgb_y_offset) == 40332,
+static_assert(offsetof(SwsInternal, yuv2rgb_y_offset) == 40348,
               "yuv2rgb_y_offset must be updated in x86 asm");
 #endif
 
