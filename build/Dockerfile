@@ -41,6 +41,7 @@ RUN apk add --no-cache $APK_OPTS \
       git \
       graphite2-static \
       jq \
+      libdrm-dev \
       libjpeg-turbo \
       libjpeg-turbo-dev \
       libpng-dev \
@@ -57,6 +58,7 @@ RUN apk add --no-cache $APK_OPTS \
       numactl-dev \
       openssl-dev \
       openssl-libs-static \
+      pkgconfig \
       py3-packaging \
       python3 \
       rust \
@@ -686,7 +688,6 @@ ARG LIBSSH_VERSION=0.11.1
 ARG LIBSSH_URL="https://gitlab.com/libssh/libssh-mirror/-/archive/libssh-$LIBSSH_VERSION/libssh-mirror-libssh-$LIBSSH_VERSION.tar.gz"
 ARG LIBSSH_SHA256=b43ef9c91b6c3db64e7ba3db101eb89dbe645db63489c19d4f88cf6f84911ec6
 # LIBSSH_STATIC=1 is REQUIRED to link statically against libssh.a so add to pkg-config file
-# make does not -j as it seems to be shaky, libssh.a used before created
 RUN \
   wget $WGET_OPTS -O libssh.tar.gz "$LIBSSH_URL" && \
   echo "$LIBSSH_SHA256  libssh.tar.gz" | sha256sum -c - && \
@@ -717,7 +718,8 @@ RUN \
     -DWITH_EXAMPLES=OFF \
     -DWITH_INTERNAL_DOC=OFF \
     .. && \
-  make -j$(nproc) install
+  # make -j seems to be shaky, libssh.a ends up truncated (used before fully created?)
+  make install
 
 # bump: svtav1 /SVTAV1_VERSION=([\d.]+)/ https://gitlab.com/AOMediaCodec/SVT-AV1.git|*
 # bump: svtav1 after cd build && ./hashupdate Dockerfile SVTAV1 $LATEST
@@ -873,13 +875,13 @@ RUN \
     --disable-examples && \
   make -j$(nproc) install
 
-# bump: libwebp /LIBWEBP_VERSION=([\d.]+)/ https://github.com/webmproject/libwebp.git|*
+# bump: libwebp /LIBWEBP_VERSION=([\d.]+)/ https://github.com/webmproject/libwebp.git|^1
 # bump: libwebp after cd build && ./hashupdate Dockerfile LIBWEBP $LATEST
 # bump: libwebp link "Release notes" https://github.com/webmproject/libwebp/releases/tag/v$LATEST
 # bump: libwebp link "Source diff $CURRENT..$LATEST" https://github.com/webmproject/libwebp/compare/v$CURRENT..v$LATEST
-ARG LIBWEBP_VERSION=1.4.0
+ARG LIBWEBP_VERSION=1.5.0
 ARG LIBWEBP_URL="https://github.com/webmproject/libwebp/archive/v$LIBWEBP_VERSION.tar.gz"
-ARG LIBWEBP_SHA256=12af50c45530f0a292d39a88d952637e43fb2d4ab1883c44ae729840f7273381
+ARG LIBWEBP_SHA256=668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37
 RUN \
   wget $WGET_OPTS -O libwebp.tar.gz "$LIBWEBP_URL" && \
   echo "$LIBWEBP_SHA256  libwebp.tar.gz" | sha256sum -c - && \
@@ -955,7 +957,7 @@ RUN \
   make -j$(nproc) install
 
 # http://websvn.xvid.org/cvs/viewvc.cgi/trunk/xvidcore/build/generic/configure.in?revision=2146&view=markup
-# bump: xvid /XVID_VERSION=([\d.]+)/ svn:http://anonymous:@svn.xvid.org|/^release-(.*)$/|/_/./|^1
+# bump: xvid /XVID_VERSION=([\d.]+)/ svn:https://anonymous:@svn.xvid.org|/^release-(.*)$/|/_/./|^1
 # bump: xvid after cd build && ./hashupdate Dockerfile XVID $LATEST
 # add extra CFLAGS that are not enabled by -O3
 ARG XVID_VERSION=1.3.7
@@ -1087,6 +1089,51 @@ RUN \
     --enable-static && \
   make -j$(nproc) install
 
+# requires libdrm
+# bump: libva /LIBVA_VERSION=([\d.]+)/ https://github.com/intel/libva.git|^2
+# bump: libva after cd build && ./hashupdate Dockerfile LIBVA $LATEST
+# bump: libva link "Changelog" https://github.com/intel/libva/blob/master/NEWS
+ARG LIBVA_VERSION=2.22.0
+ARG LIBVA_URL="https://github.com/intel/libva/archive/refs/tags/${LIBVA_VERSION}.tar.gz"
+ARG LIBVA_SHA256=467c418c2640a178c6baad5be2e00d569842123763b80507721ab87eb7af8735
+RUN \
+  wget $WGET_OPTS -O libva.tar.gz "$LIBVA_URL" && \
+  echo "$LIBVA_SHA256  libva.tar.gz" | sha256sum -c - && \
+  tar $TAR_OPTS libva.tar.gz && cd libva-* && \
+  meson setup build \
+    -Dbuildtype=release \
+    -Ddefault_library=static \
+    -Ddisable_drm=false \
+    -Dwith_x11=no \
+    -Dwith_glx=no \
+    -Dwith_wayland=no \
+    -Dwith_win32=no \
+    -Dwith_legacy=[] \
+    -Denable_docs=false && \
+  ninja -j$(nproc) -vC build install
+
+# bump: libvpl /LIBVPL_VERSION=([\d.]+)/ https://github.com/intel/libvpl.git|^2
+# bump: libvpl after cd build && ./hashupdate Dockerfile LIBVPL $LATEST
+# bump: libvpl link "Changelog" https://github.com/intel/libvpl/blob/main/CHANGELOG.md
+ARG LIBVPL_VERSION=2.14.0
+ARG LIBVPL_URL="https://github.com/intel/libvpl/archive/refs/tags/v${LIBVPL_VERSION}.tar.gz"
+ARG LIBVPL_SHA256=7c6bff1c1708d910032c2e6c44998ffff3f5fdbf06b00972bc48bf2dd9e5ac06
+RUN \
+  wget $WGET_OPTS -O libvpl.tar.gz "$LIBVPL_URL" && \
+  echo "$LIBVPL_SHA256  libvpl.tar.gz" | sha256sum -c - && \
+  tar $TAR_OPTS libvpl.tar.gz && cd libvpl-* && \
+  cmake -B build \
+    -G"Unix Makefiles" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_VERBOSE_MAKEFILE=ON \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_INSTALL_PREFIX=/usr/local \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DBUILD_TESTS=OFF \
+    -DENABLE_WARNING_AS_ERROR=ON && \
+  cmake --build build -j$(nproc) && \
+  cmake --install build
+
 # bump: vvenc /VVENC_VERSION=([\d.]+)/ https://github.com/fraunhoferhhi/vvenc.git|*
 # bump: vvenc after cd build && ./hashupdate Dockerfile VVENC $LATEST
 # bump: vvenc link "CHANGELOG" https://github.com/fraunhoferhhi/vvenc/releases/tag/v$LATEST
@@ -1174,6 +1221,7 @@ RUN \
   --enable-libvmaf \
   --enable-libvo-amrwbenc \
   --enable-libvorbis \
+  --enable-libvpl \
   --enable-libvpx \
   --enable-libvvenc \
   --enable-libwebp \
@@ -1196,9 +1244,9 @@ RUN \
 RUN \
   EXPAT_VERSION=$(pkg-config --modversion expat) \
   FFTW_VERSION=$(pkg-config --modversion fftw3) \
-  FONTCONFIG_VERSION=$(pkg-config --modversion fontconfig)  \
-  FREETYPE_VERSION=$(pkg-config --modversion freetype2)  \
-  FRIBIDI_VERSION=$(pkg-config --modversion fribidi)  \
+  FONTCONFIG_VERSION=$(pkg-config --modversion fontconfig) \
+  FREETYPE_VERSION=$(pkg-config --modversion freetype2) \
+  FRIBIDI_VERSION=$(pkg-config --modversion fribidi) \
   LIBSAMPLERATE_VERSION=$(pkg-config --modversion samplerate) \
   LIBVO_AMRWBENC_VERSION=$(pkg-config --modversion vo-amrwbenc) \
   LIBXML2_VERSION=$(pkg-config --modversion libxml-2.0) \
@@ -1250,10 +1298,12 @@ RUN \
   libtheora: env.THEORA_VERSION, \
   libtwolame: env.TWOLAME_VERSION, \
   libuavs3d: env.UAVS3D_COMMIT, \
+  libva: env.LIBVA_VERSION, \
   libvidstab: env.VIDSTAB_VERSION, \
   libvmaf: env.VMAF_VERSION, \
   libvo_amrwbenc: env.LIBVO_AMRWBENC_VERSION, \
   libvorbis: env.VORBIS_VERSION, \
+  libvpl: env.LIBVPL_VERSION, \
   libvpx: env.VPX_VERSION, \
   libvvenc: env.VVENC_VERSION, \
   libwebp: env.LIBWEBP_VERSION, \
