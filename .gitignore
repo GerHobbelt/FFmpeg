@@ -1,5 +1,6 @@
 *.a
 *.o
+*.objs
 *.o.*
 *.d
 *.def
@@ -41,10 +42,6 @@
 /src
 /mapfile
 /tools/python/__pycache__/
-.DS_Store
-/output/
-.vscode/settings.json
-/conan
-/output-conan
-.vscode/launch.json
-/.vscode
+/libavcodec/vulkan/*.c
+/libavfilter/vulkan/*.c
+/.*/
