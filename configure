@@ -2004,7 +2004,8 @@ EXTERNAL_LIBRARY_LIST="
     openssl
     pocketsphinx
     vapoursynth
-    vulkan_static
+    vulkan_statics
+    tvai
 "
 
 HWACCEL_AUTODETECT_LIBRARY_LIST="
