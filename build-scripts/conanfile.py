@@ -28,7 +28,7 @@ class conanRecipe(ConanFile):
         self.requires("zimg/3.0.5")
         if self.settings.os == "Windows":
             self.requires("amf/1.4.36")
-            self.requires("libvpl/2023.0.0")
+            self.requires("libvpl/2025.4.18")
             self.requires("zlib-mt/1.2.13")
 
     def generate(self):
