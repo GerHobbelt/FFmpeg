@@ -213,13 +213,15 @@ RUN \
 # bump: librsvg /LIBRSVG_VERSION=([\d.]+)/ https://gitlab.gnome.org/GNOME/librsvg.git|^2
 # bump: librsvg after cd build && ./hashupdate Dockerfile LIBRSVG $LATEST
 # bump: librsvg link "NEWS" https://gitlab.gnome.org/GNOME/librsvg/-/blob/master/NEWS
-ARG LIBRSVG_VERSION=2.59.2
-ARG LIBRSVG_URL="https://download.gnome.org/sources/librsvg/2.59/librsvg-$LIBRSVG_VERSION.tar.xz"
-ARG LIBRSVG_SHA256=ecd293fb0cc338c170171bbc7bcfbea6725d041c95f31385dc935409933e4597
+ARG LIBRSVG_VERSION=2.60.0
+ARG LIBRSVG_URL="https://download.gnome.org/sources/librsvg/2.60/librsvg-$LIBRSVG_VERSION.tar.xz"
+ARG LIBRSVG_SHA256=0b6ffccdf6e70afc9876882f5d2ce9ffcf2c713cbaaf1ad90170daa752e1eec3
 RUN \
   wget $WGET_OPTS -O librsvg.tar.xz "$LIBRSVG_URL" && \
   echo "$LIBRSVG_SHA256  librsvg.tar.xz" | sha256sum --status -c - && \
   tar $TAR_OPTS librsvg.tar.xz && cd librsvg-* && \
+  # workaround for https://gitlab.gnome.org/GNOME/librsvg/-/issues/1158
+  sed -i "/^if host_system in \['windows'/s/, 'linux'//" meson.build && \
   meson setup build \
     -Dbuildtype=release \
     -Ddefault_library=static \
@@ -1144,11 +1146,11 @@ RUN \
   wget $WGET_OPTS -O vvenc.tar.gz "$VVENC_URL" && \
   echo "$VVENC_SHA256  vvenc.tar.gz" | sha256sum --status -c - && \
   tar $TAR_OPTS vvenc.tar.gz && cd vvenc-* && \
-  # TODO: https://github.com/fraunhoferhhi/vvenc/pull/422
   sed -i 's/-Werror;//' source/Lib/vvenc/CMakeLists.txt && \
   cmake \
     -S . \
     -B build/release-static \
+    -DVVENC_ENABLE_WERROR=OFF \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr/local && \
   cmake --build build/release-static -j && \
