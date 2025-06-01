@@ -733,13 +733,12 @@ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
         av_log(dp, AV_LOG_ERROR, "Error submitting %s to decoder: %s\n",
                pkt ? "packet" : "EOF", av_err2str(ret));
 
-        if (ret != AVERROR_EOF) {
-            dp->dec.decode_errors++;
-            if (!exit_on_error)
-                ret = 0;
-        }
+        if (ret == AVERROR_EOF)
+            return ret;
 
-        return ret;
+        dp->dec.decode_errors++;
+        if (exit_on_error)
+            return ret;
     }
 
     while (1) {
@@ -787,15 +786,6 @@ static int packet_decode(DecoderPriv *dp, AVPacket *pkt, AVFrame *frame)
         fd->wallclock[LATENCY_PROBE_DEC_POST] = av_gettime_relative();
 
         frame->time_base = dec->pkt_timebase;
-
-        for (int i = 0; i < dec->nb_decoded_side_data; i++) {
-            const AVFrameSideData *src = dec->decoded_side_data[i];
-            if (av_frame_side_data_get(frame->side_data, frame->nb_side_data, src->type))
-                continue;
-            ret = av_frame_side_data_clone(&frame->side_data, &frame->nb_side_data, src, 0);
-            if (ret < 0)
-                return ret;
-        }
 
         if (dec->codec_type == AVMEDIA_TYPE_AUDIO) {
             dp->dec.samples_decoded += frame->nb_samples;

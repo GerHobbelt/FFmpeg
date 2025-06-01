@@ -285,10 +285,11 @@ static int update_extradata(AVCodecParameters *codecpar)
         AV_WL16A(codecpar->extradata + 16, AV_RB16A(codecpar->extradata + 16)); // Byte swap Output Gain
         break;
     case AV_CODEC_ID_AAC: {
-        uint8_t buf[5];
+        uint8_t buf[6];
+        int size = FFMIN(codecpar->extradata_size, sizeof(buf));
 
-        init_put_bits(&pb, buf, sizeof(buf));
-        ret = init_get_bits8(&gb, codecpar->extradata, codecpar->extradata_size);
+        init_put_bits(&pb, buf, size);
+        ret = init_get_bits8(&gb, codecpar->extradata, size);
         if (ret < 0)
             return ret;
 
@@ -304,6 +305,10 @@ static int update_extradata(AVCodecParameters *codecpar)
         skip_bits(&gb, 4);
         put_bits(&pb, 4, codecpar->ch_layout.nb_channels); // set channel config
         ret = put_bits_left(&pb);
+        while (ret >= 32) {
+           put_bits32(&pb, get_bits_long(&gb, 32));
+           ret -= 32;
+        }
         put_bits(&pb, ret, get_bits_long(&gb, ret));
         flush_put_bits(&pb);
 
@@ -319,7 +324,7 @@ static int update_extradata(AVCodecParameters *codecpar)
             return ret;
 
         put_bits32(&pb, get_bits_long(&gb, 32)); // min/max blocksize
-        put_bits64(&pb, 48, get_bits64(&gb, 48)); // min/max framesize
+        put_bits63(&pb, 48, get_bits64(&gb, 48)); // min/max framesize
         put_bits(&pb, 20, get_bits(&gb, 20)); // samplerate
         skip_bits(&gb, 3);
         put_bits(&pb, 3, codecpar->ch_layout.nb_channels - 1);

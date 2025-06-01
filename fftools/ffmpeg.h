@@ -233,6 +233,7 @@ typedef struct OptionsContext {
     SpecifierOptList filter_scripts;
 #endif
     SpecifierOptList reinit_filters;
+    SpecifierOptList drop_changed;
     SpecifierOptList fix_sub_duration;
     SpecifierOptList fix_sub_duration_heartbeat;
     SpecifierOptList canvas_sizes;
@@ -263,6 +264,7 @@ enum IFilterFlags {
     IFILTER_FLAG_REINIT         = (1 << 1),
     IFILTER_FLAG_CFR            = (1 << 2),
     IFILTER_FLAG_CROP           = (1 << 3),
+    IFILTER_FLAG_DROPCHANGED    = (1 << 4),
 };
 
 typedef struct InputFilterOptions {
@@ -717,6 +719,9 @@ extern float max_error_rate;
 extern char *filter_nbthreads;
 extern int filter_complex_nbthreads;
 extern int vstats_version;
+extern int print_graphs;
+extern char *print_graphs_file;
+extern char *print_graphs_format;
 extern int auto_conversion_filters;
 
 extern const AVIOInterruptCB int_cb;
