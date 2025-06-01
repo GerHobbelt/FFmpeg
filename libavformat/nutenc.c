@@ -561,8 +561,8 @@ static int write_streaminfo(NUTContext *nut, AVIOContext *bc, int stream_id) {
             count += add_info(dyn_bc, "Disposition", ff_nut_dispositions[i].str);
     }
 
-    for (i = 0; i < st->nb_side_data; i++) {
-        sd = &st->side_data[i];
+    for (i = 0; i < st->codecpar->nb_coded_side_data; i++) {
+        sd = &st->codecpar->coded_side_data[i];
 
         switch (sd->type) {
         case AV_PKT_DATA_DISPLAYMATRIX:;

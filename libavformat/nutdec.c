@@ -608,11 +608,19 @@ static int decode_info_header(NUTContext *nut)
             }
 
             if (stream_id_plus1 && !strcmp(name, "X-st_sd_displaymatrix")) {
-                uint32_t *display_matrix = (uint32_t *)av_stream_new_side_data(st, AV_PKT_DATA_DISPLAYMATRIX, 9 * sizeof(uint32_t));
+                AVPacketSideData *sd = av_packet_side_data_new(&st->codecpar->coded_side_data,
+                                                               &st->codecpar->nb_coded_side_data,
+                                                               AV_PKT_DATA_DISPLAYMATRIX,
+                                                               9 * sizeof(uint32_t), 0);
+
+                if (!sd) {
+                    return AVERROR(ENOMEM);
+                }
+
                 sscanf(str_value, "%u:%u:%u:%u:%u:%u:%u:%u:%u",
-                       &display_matrix[0], &display_matrix[1], &display_matrix[2],
-                       &display_matrix[3], &display_matrix[4], &display_matrix[5],
-                       &display_matrix[6], &display_matrix[7], &display_matrix[8]);
+                       &sd->data[0], &sd->data[1], &sd->data[2],
+                       &sd->data[3], &sd->data[4], &sd->data[5],
+                       &sd->data[6], &sd->data[7], &sd->data[8]);
                 continue;
             }
 
