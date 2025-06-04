@@ -179,7 +179,7 @@ static const AVFilterPad tvai_stb_outputs[] = {
     },
 };
 
-const AVFilter ff_vf_tvai_stb = {
+const FFFilter ff_vf_tvai_stb = {
     .name          = "tvai_stb",
     .description   = NULL_IF_CONFIG_SMALL("Apply Topaz Video AI stabilization models"),
     .priv_size     = sizeof(TVAIStbContext),

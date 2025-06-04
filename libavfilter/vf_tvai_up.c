@@ -184,7 +184,7 @@ static const AVFilterPad tvai_up_outputs[] = {
     },
 };
 
-const AVFilter ff_vf_tvai_up = {
+const FFFilter ff_vf_tvai_up = {
     .name          = "tvai_up",
     .description   = NULL_IF_CONFIG_SMALL("Apply Topaz Video AI upscale models, parameters will only be applied to appropriate models"),
     .priv_size     = sizeof(TVAIUpContext),

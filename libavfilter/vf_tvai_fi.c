@@ -187,7 +187,7 @@ static const AVFilterPad tvai_fi_outputs[] = {
     },
 };
 
-const AVFilter ff_vf_tvai_fi = {
+const FFFilter ff_vf_tvai_fi = {
     .name          = "tvai_fi",
     .description   = NULL_IF_CONFIG_SMALL("Apply Topaz Video AI frame interpolation models."),
     .priv_size     = sizeof(TVAIFIContext),
