@@ -57,16 +57,16 @@ stages:
     - job: Windows2022
       workspace:
         clean: all
-      # pool:
-      #   name: Default
-      #   demands:
-      #     - Agent.Name -equals Medusa
-      strategy:
-        matrix:
-          windows:
-            imageName: 'windows-2022'
       pool:
-        vmImage: $(imageName)
+        name: Default
+        demands:
+          - Agent.Name -equals Medusa
+      # strategy:
+      #   matrix:
+      #     windows:
+      #       imageName: 'windows-2022'
+      # pool:
+      #   vmImage: $(imageName)
       steps:
         - template: win.yml
   - ${{ if eq(parameters.linux, true) }}:
