@@ -4,7 +4,7 @@ resources:
       type: github
       endpoint: TopazLabs
       name: TopazLabs/topaz-conan-dev
-      ref: master
+      ref: feature/upload
     - repository: nv-codec-headers
       type: github
       endpoint: TopazLabs
@@ -21,7 +21,7 @@ parameters:
     type: boolean
     default: false
   - name: windows
-    displayName: 'Windows (2019)'
+    displayName: 'Windows (2022)'
     type: boolean
     default: true
   - name: linux
@@ -54,13 +54,17 @@ stages:
   condition: or(eq(variables['TAGABLE'], 'true'), eq(variables['PUBLISH'], ''))
   jobs:
   - ${{ if eq(parameters.windows, true) }}:
-    - job: Windows2019
+    - job: Windows2022
       workspace:
         clean: all
-      pool:
-        name: Default
-        demands:
-          - Agent.Name -equals Medusa
+      # pool:
+      #   name: Default
+      #   demands:
+      #     - Agent.Name -equals Medusa
+      strategy:
+        matrix:
+          windows:
+            imageName: 'windows-2022'
       steps:
         - template: win.yml
   - ${{ if eq(parameters.linux, true) }}:

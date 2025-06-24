@@ -23,12 +23,12 @@ class conanRecipe(ConanFile):
 
     def requirements(self):
         self.requires("videoai/1.9.29-win2022")
-        self.requires("libvpx/1.11.0")
-        self.requires("aom/3.5.0")
+        self.requires("libvpx/1.14.1") # new
+        self.requires("libaom-av1/3.5.0") # src now, not dev
         self.requires("zimg/3.0.5")
         if self.settings.os == "Windows":
-            self.requires("amf/1.4.36")
-            self.requires("libvpl/2023.0.0")
+            self.requires("amf/1.4.36") # headers
+            self.requires("libvpl/2023.0.0") # added for win2022
             self.requires("zlib-mt/1.2.13")
 
     def generate(self):
