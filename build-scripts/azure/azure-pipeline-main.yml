@@ -65,6 +65,8 @@ stages:
         matrix:
           windows:
             imageName: 'windows-2022'
+      pool:
+        vmImage: $(imageName)
       steps:
         - template: win.yml
   - ${{ if eq(parameters.linux, true) }}:
