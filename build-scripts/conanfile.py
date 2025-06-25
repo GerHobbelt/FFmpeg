@@ -17,7 +17,7 @@ class conanRecipe(ConanFile):
 
     def build_requirements(self):
         if self.settings.os == "Macos" and self.settings.arch == "x86_64":
-            self.tool_requires("nasm/2.14")
+            self.tool_requires("nasm/2.16.01@josh/oiio3")
         if self.settings.os == "Windows":
             self.tool_requires("nasm/2.16.01")
 
@@ -25,7 +25,11 @@ class conanRecipe(ConanFile):
         self.requires("videoai/1.9.29-win2022")
         self.requires("libvpx/1.14.1") # new
         self.requires("libaom-av1/3.5.0") # src now, not dev
-        self.requires("zimg/3.0.5")
+        
+        if self.settings.os == "Macos" and self.settings.arch == "x86_64":
+            self.requires("zimg/3.0.5@josh/oiio3")
+        else:
+            self.requires("zimg/3.0.5")
         if self.settings.os == "Windows":
             self.requires("amf/1.4.36") # headers
             self.requires("libvpl/2023.0.0") # added for win2022
