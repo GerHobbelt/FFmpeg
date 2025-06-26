@@ -22,7 +22,7 @@ class conanRecipe(ConanFile):
             self.tool_requires("nasm/2.16.01")
 
     def requirements(self):
-        self.requires("videoai/1.9.29-win2022")
+        self.requires("videoai/[~1.9.0]")
         self.requires("libvpx/1.14.1") # new
         self.requires("libaom-av1/3.5.0") # src now, not dev
         
