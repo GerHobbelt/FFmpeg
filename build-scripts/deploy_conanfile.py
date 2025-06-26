@@ -11,11 +11,14 @@ class conanRecipe(ConanFile):
             self.options["libvpx"].shared = True
 
     def requirements(self):
-        self.requires("videoai/[~1.9.0]")
-        self.requires("zimg/3.0.5")
+        self.requires("videoai/1.9.29-win2022")
+        if self.settings.os == "Macos" and self.settings.arch == "x86_64":
+            self.requires("zimg/3.0.5@josh/oiio3")
+        else:
+            self.requires("zimg/3.0.5")
         if self.settings.os == "Macos" or self.settings.os == "Linux":
-            self.requires("libvpx/1.11.0") #libvpx is static on Windows
-            self.requires("aom/3.5.0")
+            self.requires("libvpx/1.14.1") #libvpx is static on Windows
+            self.requires("libaom-av1/3.5.0")
             
     def package_id(self):
         self.info.requires["videoai"].minor_mode()
@@ -30,5 +33,11 @@ class conanRecipe(ConanFile):
         )
 
     def layout(self):
-        self.folders.source = self.conf.get("user.profile_name")
+        folder_dir = self.conf.get("user.path:folder_dir", default=None)
+        if not folder_dir:
+            folder_dir = f"{self.settings.os}_{self.settings.arch}".lower()
+
+        self.output.info(f"folder_dir: {folder_dir}")
+        self.folders.source = folder_dir
+        
         self.cpp.package.libs = collect_libs(self)
