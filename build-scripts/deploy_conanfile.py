@@ -58,10 +58,6 @@ class conanRecipe(ConanFile):
         # swresample - resampling library
         self.cpp_info.components["swresample"].libs = ["swresample"]
         self.cpp_info.components["swresample"].requires = ["avutil"]
-        
-        # postproc - post-processing library
-        self.cpp_info.components["postproc"].libs = ["postproc"]
-        self.cpp_info.components["postproc"].requires = ["avutil"]
 
     def layout(self):
         self.folders.source = self.conf.get("user.profile_name")
