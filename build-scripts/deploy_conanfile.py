@@ -29,6 +29,39 @@ class conanRecipe(ConanFile):
             keep_path=True,
         )
 
+    def package_info(self):
+        # Define individual components for each FFmpeg library
+        
+        # avutil - core utility library (base for others)
+        self.cpp_info.components["avutil"].libs = ["avutil"]
+        
+        # avcodec - codec library
+        self.cpp_info.components["avcodec"].libs = ["avcodec"]
+        self.cpp_info.components["avcodec"].requires = ["avutil"]
+        
+        # avformat - format library
+        self.cpp_info.components["avformat"].libs = ["avformat"]
+        self.cpp_info.components["avformat"].requires = ["avutil", "avcodec"]
+        
+        # avfilter - filter library
+        self.cpp_info.components["avfilter"].libs = ["avfilter"]
+        self.cpp_info.components["avfilter"].requires = ["avutil"]
+        
+        # avdevice - device library
+        self.cpp_info.components["avdevice"].libs = ["avdevice"]
+        self.cpp_info.components["avdevice"].requires = ["avutil", "avformat"]
+        
+        # swscale - scaling library
+        self.cpp_info.components["swscale"].libs = ["swscale"]
+        self.cpp_info.components["swscale"].requires = ["avutil"]
+        
+        # swresample - resampling library
+        self.cpp_info.components["swresample"].libs = ["swresample"]
+        self.cpp_info.components["swresample"].requires = ["avutil"]
+        
+        # postproc - post-processing library
+        self.cpp_info.components["postproc"].libs = ["postproc"]
+        self.cpp_info.components["postproc"].requires = ["avutil"]
+
     def layout(self):
         self.folders.source = self.conf.get("user.profile_name")
-        self.cpp.package.libs = collect_libs(self)
