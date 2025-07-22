@@ -33,7 +33,7 @@ class conanRecipe(ConanFile):
                 src=self.source_folder,
                 dst=self.package_folder,
                 keep_path=True,
-                excludes=["*.lib"]
+                excludes=["*.lib", "*.def"]
             )
             copy(
                 self,
