@@ -25,68 +25,13 @@ class conanRecipe(ConanFile):
         self.info.requires["videoai"].minor_mode()
 
     def package(self):
-        if self.settings.os == "Windows":
-            src_include = os.path.join(self.source_folder, "include")
-            if os.path.exists(src_include):
-                copy(
-                    self,
-                    "*",
-                    src=src_include,
-                    dst=os.path.join(self.package_folder, "include"),
-                    keep_path=True,
-                )
-            else:
-                # Copy header files from root if no include folder
-                copy(
-                    self,
-                    "*.h",
-                    src=self.source_folder,
-                    dst=os.path.join(self.package_folder, "include"),
-                    keep_path=True,
-                )
-            
-            # Copy libraries to lib folder (from any location in source)
-            copy(
-                self,
-                "*.lib",
-                src=self.source_folder,
-                dst=os.path.join(self.package_folder, "lib"),
-                keep_path=False,
-            )
-            
-            # Copy DLLs and executables to bin folder (from any location in source)
-            copy(
-                self,
-                "*.dll",
-                src=self.source_folder,
-                dst=os.path.join(self.package_folder, "bin"),
-                keep_path=False,
-            )
-            copy(
-                self,
-                "*.exe",
-                src=self.source_folder,
-                dst=os.path.join(self.package_folder, "bin"),
-                keep_path=False,
-            )
-            
-            # Copy pkg-config files
-            copy(
-                self,
-                "*.pc",
-                src=self.source_folder,
-                dst=os.path.join(self.package_folder, "lib", "pkgconfig"),
-                keep_path=False,
-            )
-                
-        else:
-            copy(
-                self,
-                "*",
-                src=self.source_folder,
-                dst=self.package_folder,
-                keep_path=True,
-            )
+        copy(
+            self,
+            "*",
+            src=self.source_folder,
+            dst=self.package_folder,
+            keep_path=True,
+        )
 
     def package_info(self):
         # Define individual components for each FFmpeg library
