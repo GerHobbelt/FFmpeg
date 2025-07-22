@@ -23,7 +23,7 @@ class conanRecipe(ConanFile):
 
     def requirements(self):
         # self.requires("videoai/[~1.9.0]")
-        self.requires("videoai/1.9.30", override=True)
+        self.requires("videoai/1.9.30")
         self.requires("aiengine/3.7.13", override=True)
         self.requires("libvpx/1.14.1")
         self.requires("libaom-av1/3.5.0")
