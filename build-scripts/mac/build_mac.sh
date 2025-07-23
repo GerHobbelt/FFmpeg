@@ -14,8 +14,8 @@ if [[ "$1" -eq 1 ]]; then
 	CONAN_X64=./conan_x64
 	CONAN_ARM=./conan_arm
 	export PATH=${CONAN_X64}/bin:${CONAN_ARM}/bin:$PATH
-	FLAGS=(--enable-tvai --extra-cflags="-I${CONAN_ARM}/include/videoai -I${CONAN_ARM}/include $5" --extra-ldflags="-L${CONAN_ARM}/lib -headerpad_max_install_names $6" ${FLAGS[@]})
-	XFLAGS=(--enable-tvai --arch=x86_64 --extra-cflags="-arch x86_64 -I${CONAN_X64}/include/videoai -I${CONAN_X64}/include $5" --extra-ldflags="-arch x86_64 -L${CONAN_X64}/lib -headerpad_max_install_names $6" ${XFLAGS[@]})
+	FLAGS=(--enable-tvai --extra-cflags="-I${CONAN_ARM}/include/videoai -I${CONAN_ARM}/include $5" --extra-ldflags="-L${CONAN_ARM}/lib -headerpad_max_install_names $6" --extra-libs="-lssl -lcrypto -lz" ${FLAGS[@]})
+	XFLAGS=(--enable-tvai --arch=x86_64 --extra-cflags="-arch x86_64 -I${CONAN_X64}/include/videoai -I${CONAN_X64}/include $5" --extra-ldflags="-arch x86_64 -L${CONAN_X64}/lib -headerpad_max_install_names $6" --extra-libs="-lssl -lcrypto -lz" ${XFLAGS[@]})
 fi
 
 echo "$2, $3, and $4 will be deleted in 10 seconds. Press control-c to abort..."

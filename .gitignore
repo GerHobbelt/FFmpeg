@@ -46,3 +46,5 @@
 /libavfilter/vulkan/*.c
 /.*/
 /conan
+/conan_arm
+/conan_x64
