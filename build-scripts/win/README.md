@@ -1,0 +1,2 @@
+## 7/30/2025 WIN64 ffmpeg build
+Native win arm64 builds fine, but cross compiling has issues. We need to cross compile(for now) because the VM on azure is x86_64. Issue was that in the build, bin2c.exe is created and used, but since it builds it as a arm64 binary due to cross compilation being turned on, the machine fails to run it as part of the build steps. To bypass this, i build it alone as x86_64 and make the arm64 build use that exe instead of the one it creates then. 

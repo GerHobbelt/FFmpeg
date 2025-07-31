@@ -47,5 +47,6 @@
 /.*/
 /conan
 /output-conan
+/conan-x64
 
 test.obj

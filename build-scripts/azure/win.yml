@@ -21,6 +21,37 @@ steps:
       git apply ./build-scripts/configure-zimg.patch
       git apply ./build-scripts/configure-aom.patch
       git apply ./build-scripts/intmath.patch
+    displayName: Apply patches
+  
+  - ${{ if eq(parameters.arch, 'ARM64') }}:
+      - bash: |
+          @echo off
+          setlocal enabledelayedexpansion
+          
+          REM Find Visual Studio installation path first
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do (
+            set "VSPATH=%%i"
+          )
+          echo Visual Studio found at: !VSPATH!
+          echo Calling vcvarsall.bat for x64
+          call "!VSPATH!\VC\Auxiliary\Build\vcvarsall.bat" x64
+
+          cd "$(Build.SourcesDirectory)/FFmpeg"
+          echo "Building bin2c_x64.exe to prep for arm64 build"
+
+          echo "Prep deps"
+          conan install ./build-scripts/conanfile-x64.py -u -pr:b ./build-scripts/win/profile_win2022 -pr:h ./build-scripts/win/profile_win2022 -of ./conan-x64
+
+          echo "Build bin2c_x64.exe"
+          C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win_prep.sh') AMD64"
+
+          echo "Fix bin2c.exe to use x64 version"
+          cd ../
+          git apply ./build-scripts/win/bin2c_x64.patch
+      displayName: Build bin2c_x64.exe
+  
+  - bash: |
+      cd "$(Build.SourcesDirectory)/FFmpeg"
       bash ./build-scripts/win/conan_win.sh "${{ parameters.arch }}"
     displayName: Install conan packages
 
@@ -45,7 +76,14 @@ steps:
 
       cd /d "C:\msys64"
       set MSYSTEM=MINGW64
-      C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win.sh') ${{ parameters.arch }}"
+
+      if [[ "${{ parameters.arch }}" == "ARM64" ]]; then
+        echo "Building arm64"
+        C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win_post.sh') ARM64"
+      else
+        echo "Building amd64"
+        C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win.sh') AMD64"
+      fi
     displayName: Set up MSVC toolchain and build
 
   - bash: |
