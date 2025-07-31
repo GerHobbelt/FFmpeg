@@ -24,13 +24,31 @@ class conanRecipe(ConanFile):
         self.info.requires["videoai"].minor_mode()
 
     def package(self):
-        copy(
-            self,
-            "*",
-            src=self.source_folder,
-            dst=self.package_folder,
-            keep_path=True,
-        )
+
+        if self.settings.os=="Windows":
+            copy(
+                self,
+                "*",
+                src=self.source_folder,
+                dst=self.package_folder,
+                keep_path=True,
+                excludes=["*.lib", "*.def"]
+            )
+            copy(
+                self,
+                "*.lib",
+                src=self.source_folder,
+                dst=os.path.join(self.package_folder, "lib"),
+                keep_path=False,
+            )
+        else:
+            copy(
+                self,
+                "*",
+                src=self.source_folder,
+                dst=self.package_folder,
+                keep_path=True,
+            )
 
     def layout(self):
         folder_dir = self.conf.get("user.path:folder_dir", default=None)
