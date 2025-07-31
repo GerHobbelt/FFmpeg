@@ -18,7 +18,7 @@ echo "Building bin2c.exe for x64 host..."
 source ./build-scripts/win/setup-msvc-toolchain.sh AMD64
 
 # Configure minimal build just to get bin2c for x64
-./configure --toolchain=msvc --stdc=c17 --arch=x86_64 --disable-all --enable-libzimg --extra-cflags="-I./conan-x64/lib3rdparty/zimg/include" --extra-ldflags="-libpath:./conan-x64/lib3rdparty/zimg/lib"
+./configure --toolchain=msvc --stdc=c17 --arch=x86_64 --disable-x86asm --disable-all --enable-libzimg --extra-cflags="-I./conan-x64/lib3rdparty/zimg/include" --extra-ldflags="-libpath:./conan-x64/lib3rdparty/zimg/lib"
 make ffbuild/bin2c.exe
 
 # Save the x64 bin2c
