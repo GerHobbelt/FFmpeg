@@ -46,10 +46,12 @@ steps:
           set MSYSTEM=MINGW64
           C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win_prep.sh') AMD64"
 
-          echo "Fix bin2c.exe to use x64 version"
-          cd ../
-          git apply ./build-scripts/win/bin2c_x64.patch
         displayName: Build bin2c_x64.exe
+
+      - bash: |
+          cd "$(Build.SourcesDirectory)/FFmpeg"
+          git apply ./build-scripts/win/bin2c_x64.patch
+        displayName: Apply bin2c_x64.patch
   
   - bash: |
       cd "$(Build.SourcesDirectory)/FFmpeg"
@@ -78,13 +80,14 @@ steps:
       cd /d "C:\msys64"
       set MSYSTEM=MINGW64
 
-      if [[ "${{ parameters.arch }}" == "ARM64" ]]; then
+      IF "${{ parameters.arch }}" == "ARM64" (
         echo "Building arm64"
-        C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win_post.sh') ARM64"
-      else
+        C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win_post.sh') 'ARM64'"
+      )
+      IF "${{ parameters.arch }}" == "AMD64" (
         echo "Building amd64"
-        C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win.sh') AMD64"
-      fi
+        C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win.sh') 'AMD64'"
+      )
     displayName: Set up MSVC toolchain and build
 
   - bash: |
