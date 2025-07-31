@@ -48,7 +48,7 @@ steps:
           echo "Fix bin2c.exe to use x64 version"
           cd ../
           git apply ./build-scripts/win/bin2c_x64.patch
-      displayName: Build bin2c_x64.exe
+        displayName: Build bin2c_x64.exe
   
   - bash: |
       cd "$(Build.SourcesDirectory)/FFmpeg"
