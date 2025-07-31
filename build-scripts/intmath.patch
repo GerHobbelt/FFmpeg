@@ -1,0 +1,13 @@
+diff --git a/libavutil/x86/intmath.h b/libavutil/x86/intmath.h
+index 4893a1f1b4..7e93164784 100644
+--- a/libavutil/x86/intmath.h
++++ b/libavutil/x86/intmath.h
+@@ -48,7 +48,7 @@ static av_always_inline av_const int ff_log2_x86(unsigned int v)
+ #   define ff_log2_16bit av_log2
+ 
+ #if defined(__INTEL_COMPILER) || (defined(_MSC_VER) && (_MSC_VER >= 1700) && \
+-                                  (defined(__BMI__) || !defined(__clang__)))
++                                  (defined(__BMI__) && !defined(_M_ARM64) || !defined(__clang__)) && !defined(_M_ARM64))
+ #   define ff_ctz(v) _tzcnt_u32(v)
+ 
+ #   if ARCH_X86_64
