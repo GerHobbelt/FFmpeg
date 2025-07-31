@@ -1,5 +1,6 @@
 from conan import ConanFile
 from conan.tools.files import copy, collect_libs
+import os
 
 class conanRecipe(ConanFile):
     name = "topaz-ffmpeg"
