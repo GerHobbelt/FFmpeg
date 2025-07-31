@@ -21,7 +21,7 @@ steps:
       git apply ./build-scripts/configure-zimg.patch
       git apply ./build-scripts/configure-aom.patch
       git apply ./build-scripts/intmath.patch
-      bash ./build-scripts/win/conan_win.sh ${parameters.arch}
+      bash ./build-scripts/win/conan_win.sh "${{ parameters.arch }}"
     displayName: Install conan packages
 
   - script: |
@@ -45,7 +45,7 @@ steps:
 
       cd /d "C:\msys64"
       set MSYSTEM=MINGW64
-      C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win.sh') ${parameters.arch}"
+      C:\msys64\msys2_shell.cmd -defterm -no-start -mingw64 -c "$(cygpath '$(Build.SourcesDirectory)/FFmpeg/build-scripts/win/build_win.sh') ${{ parameters.arch }}"
     displayName: Set up MSVC toolchain and build
 
   - bash: |
@@ -53,9 +53,15 @@ steps:
       if [[ "${BUILD_REASON}" == "PullRequest" || -z "${PUBLISH}" ]]; then
         exit 0
       else
+        if [[ "${{ parameters.arch }}" == "AMD64" ]]; then
         mkdir -p "$(Build.SourcesDirectory)/topaz-conan-dev/prebuilt/topaz-ffmpeg/$(VERSION)/windows_x86_64_2022/build_type=Release/"
         cp build-scripts/deploy_conanfile.py "$(Build.SourcesDirectory)/topaz-conan-dev/prebuilt/topaz-ffmpeg/$(VERSION)/conanfile.py"
         cp -Rp "output-conan"/* "$(Build.SourcesDirectory)/topaz-conan-dev/prebuilt/topaz-ffmpeg/$(VERSION)/windows_x86_64_2022/build_type=Release/"
+        elif [[ "${{ parameters.arch }}" == "ARM64" ]]; then
+          mkdir -p "$(Build.SourcesDirectory)/topaz-conan-dev/prebuilt/topaz-ffmpeg/$(VERSION)/windows_armv8_2022/build_type=Release/"
+          cp build-scripts/deploy_conanfile.py "$(Build.SourcesDirectory)/topaz-conan-dev/prebuilt/topaz-ffmpeg/$(VERSION)/conanfile.py"
+          cp -Rp "output-conan"/* "$(Build.SourcesDirectory)/topaz-conan-dev/prebuilt/topaz-ffmpeg/$(VERSION)/windows_armv8_2022/build_type=Release/"
+        fi
         cd "$(Build.SourcesDirectory)/topaz-conan-dev"
         ./run_publish_prebuilt.sh --package-name topaz-ffmpeg --package-version "$(VERSION)" -r topaz-conan
       fi
