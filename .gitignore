@@ -46,3 +46,6 @@
 /libavfilter/vulkan/*.c
 /.*/
 /conan
+/output-conan
+
+test.obj

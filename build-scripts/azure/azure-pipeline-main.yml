@@ -21,7 +21,11 @@ parameters:
     type: boolean
     default: false
   - name: windows
-    displayName: 'Windows (2019)'
+    displayName: 'Windows (2022)'
+    type: boolean
+    default: true
+  - name: windows_arm
+    displayName: 'Windows ARM64 (2022)'
     type: boolean
     default: true
   - name: linux
@@ -54,7 +58,7 @@ stages:
   condition: or(eq(variables['TAGABLE'], 'true'), eq(variables['PUBLISH'], ''))
   jobs:
   - ${{ if eq(parameters.windows, true) }}:
-    - job: Windows2019
+    - job: Windows2022
       workspace:
         clean: all
       pool:
@@ -63,6 +67,18 @@ stages:
             - Agent.Name -equals Medusa
       steps:
         - template: win.yml
+          parameters:
+                arch: AMD64
+  - ${{ if eq(parameters.windows_arm, true) }}:
+    - job: Windows2022ARM
+      workspace:
+        clean: all
+      pool:
+        name: 'WinARM'
+      steps:
+        - template: win.yml
+          parameters:
+                arch: ARM64
 
   - ${{ if eq(parameters.linux, true) }}:
     - job: Ubuntu22_04

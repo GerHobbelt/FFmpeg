@@ -5,13 +5,19 @@ set -e
 ARCH=${1:?"Missing ARCH argument. ARCH=ARM64 or ARCH=AMD64"}
 
 # Ensure all expected system dependencies
-pacman -S --noconfirm base-devel
+pacman -S --noconfirm base-devel pkg-config
 
 # Navigate to sources directory
-cd "$(dirname "$0")/../../../"
-# Navigate to nv-codec-headers directory
+echo "Current directory: $(pwd)"
+echo 1
+cd /c/Users/joshy/topaz-code/
+echo "Current directory NOW: $(pwd)"
+
+echo 2
+
 cd "./nv-codec-headers"
 make install
+# exit 1
 # Navigate to FFmpeg directory (from nv-codec-headers directory)
 cd "../FFmpeg"
 source ./build-scripts/win/setup-msvc-toolchain.sh ${ARCH}

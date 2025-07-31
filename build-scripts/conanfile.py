@@ -18,20 +18,27 @@ class conanRecipe(ConanFile):
     def build_requirements(self):
         if self.settings.os == "Macos" and self.settings.arch == "x86_64":
             self.tool_requires("nasm/2.14")
-        if self.settings.os == "Windows":
+        if self.settings.os == "Windows" and self.settings.arch == "x86_64":
             self.tool_requires("nasm/2.16.01")
 
     def requirements(self):
-        self.requires("videoai/[~1.9.0]")
-        self.requires("libvpx/1.14.1")
-        self.requires("libaom-av1/3.5.0")
+        self.requires("videoai/1.9.39-winarm")
+        if self.settings.os == "Windows" and self.settings.arch == "armv8":
+            self.requires("libvpx/1.15.2")    
+            self.requires("libaom-av1/3.8.0")
+        else:
+            self.requires("libvpx/1.14.1")
+            self.requires("libaom-av1/3.5.0")
+
         if self.settings.os == "Macos" and self.settings.arch == "x86_64":
             self.requires("zimg/3.0.5@josh/oiio3")
         else:
             self.requires("zimg/3.0.5")
+
         if self.settings.os == "Windows":
-            self.requires("amf/1.4.36")
-            self.requires("libvpl/2025.4.18")
+            if self.settings.arch == "x86_64":
+                self.requires("amf/1.4.36")
+                self.requires("libvpl/2025.4.18")
             self.requires("zlib-mt/1.2.13")
     def generate(self):
         for dep in self.dependencies.values():
