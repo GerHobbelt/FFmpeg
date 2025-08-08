@@ -1,6 +1,7 @@
 steps:
   - checkout: self
   - checkout: topaz-conan-dev
+  - checkout: pipeline-helper
     
   - template: set_tools_and_deps.yml
     parameters:
@@ -18,3 +19,21 @@ steps:
         arch -arm64 bash ./build_and_publish.sh $(VERSION) _ _ $(Build.SourcesDirectory)/topaz-conan-dev 1
       fi
     displayName: Build
+  
+  - bash: |
+      cp "$(Build.SourcesDirectory)/pipeline-helper/dependency-manager/dependency_viewer.py" "$(Build.SourcesDirectory)/FFmpeg/build-scripts"
+      cd "$(Build.SourcesDirectory)/FFmpeg/build-scripts"
+
+      cp ./mac/profile_mac_armv8 ./profile_mac_armv8
+      cp ./mac/profile_mac14.0 ./profile_mac_x86_64
+
+      python dependency_viewer.py -os=MAC -ar=armv8 -v="$(VERSION)" -bn="$BUILD_NOTE" -a="$(Build.RequestedFor)"
+      python dependency_viewer.py -os=MAC -ar=x86_64 -v="$(VERSION)" -bn="$BUILD_NOTE" -a="$(Build.RequestedFor)"
+
+    condition: and(succeeded(), ne(variables['PUBLISH'], ''))
+    displayName: Slack Dependency Manager
+    continueOnError: true 
+    env:
+      DEPENDENCY_MANAGER_SLACK_WEBHOOK: $(DEPENDENCY_MANAGER_SLACK_WEBHOOK)
+      BUILD_TYPE: ""
+
