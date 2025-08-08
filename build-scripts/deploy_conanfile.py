@@ -26,13 +26,61 @@ class conanRecipe(ConanFile):
         self.info.requires["videoai"].minor_mode()
 
     def package(self):
-        copy(
-            self,
-            "*",
-            src=self.source_folder,
-            dst=self.package_folder,
-            keep_path=True,
-        )
+
+        if self.settings.os=="Windows":
+            copy(
+                self,
+                "*",
+                src=self.source_folder,
+                dst=self.package_folder,
+                keep_path=True,
+                excludes=["*.lib", "*.def"]
+            )
+            copy(
+                self,
+                "*.lib",
+                src=self.source_folder,
+                dst=os.path.join(self.package_folder, "lib"),
+                keep_path=False,
+            )
+        else:
+            copy(
+                self,
+                "*",
+                src=self.source_folder,
+                dst=self.package_folder,
+                keep_path=True,
+            )
+
+    def package_info(self):
+        # Define individual components for each FFmpeg library
+        
+        # avutil - core utility library (base for others)
+        self.cpp_info.components["avutil"].libs = ["avutil"]
+        
+        # avcodec - codec library
+        self.cpp_info.components["avcodec"].libs = ["avcodec"]
+        self.cpp_info.components["avcodec"].requires = ["avutil"]
+        
+        # avformat - format library
+        self.cpp_info.components["avformat"].libs = ["avformat"]
+        self.cpp_info.components["avformat"].requires = ["avutil", "avcodec"]
+        
+        # avfilter - filter library
+        self.cpp_info.components["avfilter"].libs = ["avfilter"]
+        self.cpp_info.components["avfilter"].requires = ["avutil"]
+        
+        # avdevice - device library
+        self.cpp_info.components["avdevice"].libs = ["avdevice"]
+        self.cpp_info.components["avdevice"].requires = ["avutil", "avformat"]
+        
+        # swscale - scaling library
+        self.cpp_info.components["swscale"].libs = ["swscale"]
+        self.cpp_info.components["swscale"].requires = ["avutil"]
+        
+        # swresample - resampling library
+        self.cpp_info.components["swresample"].libs = ["swresample"]
+        self.cpp_info.components["swresample"].requires = ["avutil"]
 
     def layout(self):
         folder_dir = self.conf.get("user.path:folder_dir", default=None)
