@@ -75,7 +75,7 @@ stages:
   condition: or(eq(variables['TAGABLE'], 'true'), eq(variables['PUBLISH'], ''))
   jobs:
   - ${{ if eq(parameters.windows, true) }}:
-    - job: Windows2019
+    - job: Windows2022
       workspace:
         clean: all
       pool:
