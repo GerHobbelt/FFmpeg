@@ -8,7 +8,7 @@ parameters:
     type: boolean
     default: false
   - name: windows
-    displayName: 'Windows (2019)'
+    displayName: 'Windows (2022)'
     type: boolean
     default: true
   - name: linux
