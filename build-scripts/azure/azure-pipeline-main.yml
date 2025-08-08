@@ -19,7 +19,7 @@ parameters:
     displayName: 'MacOS'
     type: boolean
     default: true
-  - name: nv-codec-headers
+  - name: nv_codec_headers
     displayName: 'NV CODEC HEADERS version(tag)'
     type: string
     default: n13.0.19.0
@@ -55,7 +55,7 @@ resources:
   repositories:
     - repository: pipeline-helper
       type: github
-      endpoint: TopazLabs (1)
+      endpoint: TopazLabs
       name: TopazLabs/pipeline-helper
       ref: feature/upgrade
     - repository: topaz-conan-dev
@@ -67,7 +67,7 @@ resources:
       type: github
       endpoint: TopazLabs
       name: FFmpeg/nv-codec-headers
-      ref: "refs/tags/${{ parameters.nv-codec-headers }}"
+      ref: "refs/tags/${{ parameters.nv_codec_headers }}"
 
 
 stages:
