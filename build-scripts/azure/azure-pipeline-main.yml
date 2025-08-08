@@ -67,7 +67,7 @@ resources:
       type: github
       endpoint: TopazLabs
       name: FFmpeg/nv-codec-headers
-      ref: refs/tags/${{ parameters.nv-codec-headers }}
+      ref: "refs/tags/${{ parameters.nv-codec-headers }}"
 
 
 stages:
