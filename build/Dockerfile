@@ -2,7 +2,7 @@
 
 # bump: alpine /ALPINE_VERSION=docker.io\/library\/alpine:([\d.]+)/ docker:alpine|^3
 # bump: alpine link "Release notes" https://alpinelinux.org/posts/Alpine-$LATEST-released.html
-ARG ALPINE_VERSION=docker.io/library/alpine:3.20.6
+ARG ALPINE_VERSION=docker.io/library/alpine:3.20.7
 FROM $ALPINE_VERSION AS build
 
 # Alpine Package Keeper options
