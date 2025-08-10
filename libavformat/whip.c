@@ -258,7 +258,7 @@ typedef struct WHIPContext {
     int64_t whip_dtls_time;
     int64_t whip_srtp_time;
 
-    /* The certificate and private key content used for DTLS hanshake */
+    /* The certificate and private key content used for DTLS handshake */
     char cert_buf[MAX_CERTIFICATE_SIZE];
     char key_buf[MAX_CERTIFICATE_SIZE];
     /* The fingerprint of certificate, used in SDP offer. */
@@ -1303,6 +1303,7 @@ next_packet:
                 } else
                     av_dict_set(&opts, "key_pem", whip->key_buf, 0);
                 av_dict_set_int(&opts, "external_sock", 1, 0);
+                av_dict_set_int(&opts, "use_srtp", 1, 0);
                 av_dict_set_int(&opts, "listen", 1, 0);
                 /* If got the first binding response, start DTLS handshake. */
                 ret = ffurl_open_whitelist(&whip->dtls_uc, buf, AVIO_FLAG_READ_WRITE, &s->interrupt_callback,
