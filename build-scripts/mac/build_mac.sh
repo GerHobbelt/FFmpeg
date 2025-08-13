@@ -7,8 +7,8 @@ if [ -z "$2" -o -z "$3" -o -z "$4" ]; then
 	exit 1
 fi;
 
-FLAGS=(--enable-libvpx --enable-libaom --enable-libzimg --enable-openssl --disable-ffplay --enable-shared --disable-static --disable-asm --enable-neon --disable-libxcb --disable-sdl2 --disable-xlib)
-XFLAGS=(--arch=x86_64 --disable-ffplay --enable-cross-compile --enable-shared --enable-libvpx --enable-libaom --enable-libzimg --enable-openssl --disable-libxcb --disable-sdl2 --disable-xlib)
+FLAGS=(--enable-libvpx --enable-libaom --enable-libzimg --enable-openssl --disable-muxer=whip --disable-ffplay --enable-shared --disable-static --disable-asm --enable-neon --disable-libxcb --disable-sdl2 --disable-xlib)
+XFLAGS=(--arch=x86_64 --disable-ffplay --enable-cross-compile --enable-shared --enable-libvpx --enable-libaom --enable-libzimg --enable-openssl --disable-muxer=whip --disable-libxcb --disable-sdl2 --disable-xlib)
 if [[ "$1" -eq 1 ]]; then
 	bash ./build-scripts/mac/conan_mac.sh
 	CONAN_X64=./conan_x64
