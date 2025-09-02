@@ -168,7 +168,7 @@ int ff_tvai_postflight(AVFilterLink *outlink, void* pFrameProcessor, AVFrame* pr
         int ret = ff_tvai_add_output(pFrameProcessor, outlink, previousFrame);
         if(ret)
             return ret;
-        tvai_wait(500);
+        tvai_wait(50000);
         pr = remaining;
         remaining = tvai_remaining_frames(pFrameProcessor);
         if(pr == remaining)
