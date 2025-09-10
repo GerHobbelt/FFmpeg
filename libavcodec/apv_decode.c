@@ -361,9 +361,6 @@ static int apv_decode(AVCodecContext *avctx, AVFrame *output,
         return err;
     }
 
-    if (avctx->skip_frame == AVDISCARD_ALL)
-        return 0;
-
     desc = av_pix_fmt_desc_get(avctx->pix_fmt);
     av_assert0(desc);
 
