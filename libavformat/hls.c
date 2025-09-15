@@ -735,47 +735,47 @@ static int open_url(AVFormatContext *s, AVIOContext **pb, const char *url,
 
 static int test_segment(AVFormatContext *s, const AVInputFormat *in_fmt, struct playlist *pls, struct segment *seg)
 {
-    HLSContext *c = s->priv_data;
-    int matchA = 3;
-    int matchF = 0;
+    // HLSContext *c = s->priv_data;
+    // int matchA = 3;
+    // int matchF = 0;
 
-    if (!c->extension_picky)
-        return 0;
+    // if (!c->extension_picky)
+    //     return 0;
 
-    if (strcmp(c->allowed_segment_extensions, "ALL"))
-        matchA =      av_match_ext    (seg->url, c->allowed_segment_extensions)
-                 + 2*(ff_match_url_ext(seg->url, c->allowed_segment_extensions) > 0);
+    // if (strcmp(c->allowed_segment_extensions, "ALL"))
+    //     matchA =      av_match_ext    (seg->url, c->allowed_segment_extensions)
+    //              + 2*(ff_match_url_ext(seg->url, c->allowed_segment_extensions) > 0);
 
-    if (!matchA) {
-        av_log(s, AV_LOG_ERROR, "URL %s is not in allowed_segment_extensions, consider updating hls.c and submitting a patch to ffmpeg-devel, if this should be added\n", seg->url);
-        return AVERROR_INVALIDDATA;
-    }
+    // if (!matchA) {
+    //     av_log(s, AV_LOG_ERROR, "URL %s is not in allowed_segment_extensions, consider updating hls.c and submitting a patch to ffmpeg-devel, if this should be added\n", seg->url);
+    //     return AVERROR_INVALIDDATA;
+    // }
 
-    if (in_fmt) {
-        if (in_fmt->extensions) {
-            matchF =      av_match_ext(    seg->url, in_fmt->extensions)
-                     + 2*(ff_match_url_ext(seg->url, in_fmt->extensions) > 0);
-            // Youtube uses aac files with .ts extension
-            if(av_match_name("mp4", in_fmt->name) || av_match_name("aac", in_fmt->name)) {
-                matchF |=      av_match_ext(    seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts,cmfv,cmfa")
-                          + 2*(ff_match_url_ext(seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts,cmfv,cmfa") > 0);
-            }
-        } else if (!strcmp(in_fmt->name, "mpegts")) {
-            const char *str = "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts"
-                              ",html" // https://flash1.bogulus.cfd/
-                            ;
-            matchF =      av_match_ext(    seg->url, str)
-                     + 2*(ff_match_url_ext(seg->url, str) > 0);
-        } else if (!strcmp(in_fmt->name, "webvtt")) {
-            matchF =      av_match_ext(    seg->url, "vtt,webvtt")
-                     + 2*(ff_match_url_ext(seg->url, "vtt,webvtt") > 0);
-        }
+    // if (in_fmt) {
+    //     if (in_fmt->extensions) {
+    //         matchF =      av_match_ext(    seg->url, in_fmt->extensions)
+    //                  + 2*(ff_match_url_ext(seg->url, in_fmt->extensions) > 0);
+    //         // Youtube uses aac files with .ts extension
+    //         if(av_match_name("mp4", in_fmt->name) || av_match_name("aac", in_fmt->name)) {
+    //             matchF |=      av_match_ext(    seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts,cmfv,cmfa")
+    //                       + 2*(ff_match_url_ext(seg->url, "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts,cmfv,cmfa") > 0);
+    //         }
+    //     } else if (!strcmp(in_fmt->name, "mpegts")) {
+    //         const char *str = "ts,m2t,m2ts,mts,mpg,m4s,mpeg,mpegts"
+    //                           ",html" // https://flash1.bogulus.cfd/
+    //                         ;
+    //         matchF =      av_match_ext(    seg->url, str)
+    //                  + 2*(ff_match_url_ext(seg->url, str) > 0);
+    //     } else if (!strcmp(in_fmt->name, "webvtt")) {
+    //         matchF =      av_match_ext(    seg->url, "vtt,webvtt")
+    //                  + 2*(ff_match_url_ext(seg->url, "vtt,webvtt") > 0);
+    //     }
 
-        if (!(matchA & matchF)) {
-            av_log(s, AV_LOG_ERROR, "detected format %s extension %s mismatches allowed extensions in url %s\n", in_fmt->name, in_fmt->extensions ? in_fmt->extensions : "none", seg->url);
-            return AVERROR_INVALIDDATA;
-        }
-    }
+    //     if (!(matchA & matchF)) {
+    //         av_log(s, AV_LOG_ERROR, "detected format %s extension %s mismatches allowed extensions in url %s\n", in_fmt->name, in_fmt->extensions ? in_fmt->extensions : "none", seg->url);
+    //         return AVERROR_INVALIDDATA;
+    //     }
+    // }
 
     return 0;
 }
