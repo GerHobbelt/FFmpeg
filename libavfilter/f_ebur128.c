@@ -75,6 +75,11 @@ struct integrator {
 
 struct rect { int x, y, w, h; };
 
+struct biquad {
+    double b0, b1, b2;
+    double a1, a2;
+};
+
 typedef struct EBUR128Context {
     const AVClass *class;           ///< AVClass context for log and options purpose
 
@@ -115,13 +120,10 @@ typedef struct EBUR128Context {
 
     /* Filter caches.
      * The mult by 3 in the following is for X[i], X[i-1] and X[i-2] */
-    double *x;                      ///< 3 input samples cache for each channel
     double *y;                      ///< 3 pre-filter samples cache for each channel
     double *z;                      ///< 3 RLB-filter samples cache for each channel
-    double pre_b[3];                ///< pre-filter numerator coefficients
-    double pre_a[3];                ///< pre-filter denominator coefficients
-    double rlb_b[3];                ///< rlb-filter numerator coefficients
-    double rlb_a[3];                ///< rlb-filter denominator coefficients
+    struct biquad pre;
+    struct biquad rlb;
 
     struct integrator i400;         ///< 400ms integrator, used for Momentary loudness  (M), and Integrated loudness (I)
     struct integrator i3000;        ///<    3s integrator, used for Short term loudness (S), and Loudness Range      (LRA)
@@ -406,21 +408,21 @@ static int config_audio_input(AVFilterLink *inlink)
 
     double a0 = 1.0 + K / Q + K * K;
 
-    ebur128->pre_b[0] = (Vh + Vb * K / Q + K * K) / a0;
-    ebur128->pre_b[1] = 2.0 * (K * K - Vh) / a0;
-    ebur128->pre_b[2] = (Vh - Vb * K / Q + K * K) / a0;
-    ebur128->pre_a[1] = 2.0 * (K * K - 1.0) / a0;
-    ebur128->pre_a[2] = (1.0 - K / Q + K * K) / a0;
+    ebur128->pre.b0 = (Vh + Vb * K / Q + K * K) / a0;
+    ebur128->pre.b1 = 2.0 * (K * K - Vh) / a0;
+    ebur128->pre.b2 = (Vh - Vb * K / Q + K * K) / a0;
+    ebur128->pre.a1 = 2.0 * (K * K - 1.0) / a0;
+    ebur128->pre.a2 = (1.0 - K / Q + K * K) / a0;
 
     f0 = 38.13547087602444;
     Q = 0.5003270373238773;
     K = tan(M_PI * f0 / (double)inlink->sample_rate);
 
-    ebur128->rlb_b[0] = 1.0;
-    ebur128->rlb_b[1] = -2.0;
-    ebur128->rlb_b[2] = 1.0;
-    ebur128->rlb_a[1] = 2.0 * (K * K - 1.0) / (1.0 + K / Q + K * K);
-    ebur128->rlb_a[2] = (1.0 - K / Q + K * K) / (1.0 + K / Q + K * K);
+    ebur128->rlb.b0 = 1.0;
+    ebur128->rlb.b1 = -2.0;
+    ebur128->rlb.b2 = 1.0;
+    ebur128->rlb.a1 = 2.0 * (K * K - 1.0) / (1.0 + K / Q + K * K);
+    ebur128->rlb.a2 = (1.0 - K / Q + K * K) / (1.0 + K / Q + K * K);
 
     /* Force 100ms framing in case of metadata injection: the frames must have
      * a granularity of the window overlap to be accurately exploited.
@@ -446,11 +448,10 @@ static int config_audio_output(AVFilterLink *outlink)
                    AV_CH_SURROUND_DIRECT_LEFT               |AV_CH_SURROUND_DIRECT_RIGHT)
 
     ebur128->nb_channels  = nb_channels;
-    ebur128->x            = av_calloc(nb_channels, 3 * sizeof(*ebur128->x));
     ebur128->y            = av_calloc(nb_channels, 3 * sizeof(*ebur128->y));
     ebur128->z            = av_calloc(nb_channels, 3 * sizeof(*ebur128->z));
     ebur128->ch_weighting = av_calloc(nb_channels, sizeof(*ebur128->ch_weighting));
-    if (!ebur128->ch_weighting || !ebur128->x || !ebur128->y || !ebur128->z)
+    if (!ebur128->ch_weighting ||  !ebur128->y || !ebur128->z)
         return AVERROR(ENOMEM);
 
 #define I400_BINS(x)  ((x) * 4 / 10)
@@ -656,6 +657,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *insamples)
     }
 #endif
 
+    const struct biquad pre = ebur128->pre;
+    const struct biquad rlb = ebur128->rlb;
+
     for (idx_insample = ebur128->idx_insample; idx_insample < nb_samples; idx_insample++) {
         const int bin_id_400  = ebur128->i400.cache_pos;
         const int bin_id_3000 = ebur128->i3000.cache_pos;
@@ -673,38 +677,32 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *insamples)
         MOVE_TO_NEXT_CACHED_ENTRY(3000);
 
         for (ch = 0; ch < nb_channels; ch++) {
-            double bin;
-
             if (ebur128->peak_mode & PEAK_MODE_SAMPLES_PEAKS)
                 ebur128->sample_peaks[ch] = FFMAX(ebur128->sample_peaks[ch], fabs(samples[idx_insample * nb_channels + ch]));
-
-            ebur128->x[ch * 3] = samples[idx_insample * nb_channels + ch]; // set X[i]
 
             if (!ebur128->ch_weighting[ch])
                 continue;
 
             /* Y[i] = X[i]*b0 + X[i-1]*b1 + X[i-2]*b2 - Y[i-1]*a1 - Y[i-2]*a2 */
-#define FILTER(Y, X, NUM, DEN) do {                                             \
-            double *dst = ebur128->Y + ch*3;                                    \
-            double *src = ebur128->X + ch*3;                                    \
-            dst[2] = dst[1];                                                    \
-            dst[1] = dst[0];                                                    \
-            dst[0] = src[0]*NUM[0] + src[1]*NUM[1] + src[2]*NUM[2]              \
-                                   - dst[1]*DEN[1] - dst[2]*DEN[2];             \
+#define FILTER(DST, SRC, FILT) do {                                             \
+            const double tmp = DST[0] = FILT.b0 * SRC + DST[1];                 \
+            DST[1] = FILT.b1 * SRC + DST[2] - FILT.a1 * tmp;                    \
+            DST[2] = FILT.b2 * SRC - FILT.a2 * tmp;                             \
 } while (0)
 
-            // TODO: merge both filters in one?
-            FILTER(y, x, ebur128->pre_b, ebur128->pre_a);  // apply pre-filter
-            ebur128->x[ch * 3 + 2] = ebur128->x[ch * 3 + 1];
-            ebur128->x[ch * 3 + 1] = ebur128->x[ch * 3    ];
-            FILTER(z, y, ebur128->rlb_b, ebur128->rlb_a);  // apply RLB-filter
+            const double x = samples[idx_insample * nb_channels + ch];
+            double *restrict y = &ebur128->y[3 * ch];
+            double *restrict z = &ebur128->z[3 * ch];
 
-            bin = ebur128->z[ch * 3] * ebur128->z[ch * 3];
+            // TODO: merge both filters in one?
+            FILTER(y, x, pre);  // apply pre-filter
+            FILTER(z, *y, rlb); // apply RLB-filter
 
             /* add the new value, and limit the sum to the cache size (400ms or 3s)
              * by removing the oldest one */
-            ebur128->i400.sum [ch] = ebur128->i400.sum [ch] + bin - ebur128->i400.cache [ch][bin_id_400];
-            ebur128->i3000.sum[ch] = ebur128->i3000.sum[ch] + bin - ebur128->i3000.cache[ch][bin_id_3000];
+            const double bin = *z * *z;
+            ebur128->i400.sum [ch] += bin - ebur128->i400.cache [ch][bin_id_400];
+            ebur128->i3000.sum[ch] += bin - ebur128->i3000.cache[ch][bin_id_3000];
 
             /* override old cache entry with the new value */
             ebur128->i400.cache [ch][bin_id_400 ] = bin;
@@ -1075,7 +1073,6 @@ static av_cold void uninit(AVFilterContext *ctx)
     }
 
     av_freep(&ebur128->y_line_ref);
-    av_freep(&ebur128->x);
     av_freep(&ebur128->y);
     av_freep(&ebur128->z);
     av_freep(&ebur128->ch_weighting);
