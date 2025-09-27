@@ -14307,6 +14307,10 @@ A '|'-separated list of color space names, such as
 A '|'-separated list of color range names, such as
 "color_ranges=tv|pc".
 
+@item alpha_modes
+A '|'-separated list of color range names, such as
+"alpha_modes=straight|premultiplied".
+
 @end table
 
 @subsection Examples
@@ -19626,6 +19630,20 @@ By default value 0xf, all planes will be processed.
 
 @item inplace
 Do not require 2nd input for processing, instead use alpha plane from input stream.
+@end table
+
+@section premultiply_dynamic
+Dynamically premultiply or unpremultiply the input video stream as needed,
+to match the requirements of the downstream filter graph. This is roughly
+equivalent to either @code{premultiply:inplace=yes} or
+@code{unpremultiply:inplace=yes}, or otherwise a noop.
+
+The filter accepts the following option:
+
+@table @option
+@item planes
+Set which planes will be processed, unprocessed planes will be copied.
+By default value 0xf, all planes will be processed.
 @end table
 
 @section prewitt
@@ -29262,6 +29280,11 @@ name.
 @item range
 A string representing the color range of the buffered video frames.
 It may be a number corresponding to a color range, or a color range
+name.
+
+@item alpha_mode
+A string representing the alpha mode of the buffered video frames.
+It may be a number corresponding to an alpha mode, or an alpha mode
 name.
 
 @item pixel_aspect, sar
