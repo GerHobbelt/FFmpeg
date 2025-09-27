@@ -84,47 +84,7 @@ cglobal put_pixels8_x2, 4,5
 INIT_MMX mmxext
 PUT_PIXELS8_X2
 
-
 ; void ff_put_pixels16_x2(uint8_t *block, const uint8_t *pixels, ptrdiff_t line_size, int h)
-%macro PUT_PIXELS_16 0
-cglobal put_pixels16_x2, 4,5
-    lea          r4, [r2*2]
-.loop:
-    mova         m0, [r1]
-    mova         m1, [r1+r2]
-    mova         m2, [r1+8]
-    mova         m3, [r1+r2+8]
-    PAVGB        m0, [r1+1]
-    PAVGB        m1, [r1+r2+1]
-    PAVGB        m2, [r1+9]
-    PAVGB        m3, [r1+r2+9]
-    mova       [r0], m0
-    mova    [r0+r2], m1
-    mova     [r0+8], m2
-    mova  [r0+r2+8], m3
-    add          r1, r4
-    add          r0, r4
-    mova         m0, [r1]
-    mova         m1, [r1+r2]
-    mova         m2, [r1+8]
-    mova         m3, [r1+r2+8]
-    PAVGB        m0, [r1+1]
-    PAVGB        m1, [r1+r2+1]
-    PAVGB        m2, [r1+9]
-    PAVGB        m3, [r1+r2+9]
-    add          r1, r4
-    mova       [r0], m0
-    mova    [r0+r2], m1
-    mova     [r0+8], m2
-    mova  [r0+r2+8], m3
-    add          r0, r4
-    sub         r3d, 4
-    jne .loop
-    RET
-%endmacro
-
-INIT_MMX mmxext
-PUT_PIXELS_16
 ; The 8_X2 macro can easily be used here
 INIT_XMM sse2
 PUT_PIXELS8_X2
@@ -410,53 +370,9 @@ INIT_XMM sse2
 AVG_PIXELS8_Y2
 
 
-; void ff_avg_pixels8_xy2(uint8_t *block, const uint8_t *pixels, ptrdiff_t line_size, int h)
-; Note this is not correctly rounded, and is therefore used for
-; not-bitexact output
-INIT_MMX mmxext
-cglobal avg_approx_pixels8_xy2, 4,5
-    mova         m6, [pb_1]
-    lea          r4, [r2*2]
-    mova         m0, [r1]
-    PAVGB        m0, [r1+1]
-.loop:
-    mova         m2, [r1+r4]
-    mova         m1, [r1+r2]
-    psubusb      m2, m6
-    PAVGB        m1, [r1+r2+1]
-    PAVGB        m2, [r1+r4+1]
-    add          r1, r4
-    PAVGB        m0, m1
-    PAVGB        m1, m2
-    PAVGB        m0, [r0]
-    PAVGB        m1, [r0+r2]
-    mova       [r0], m0
-    mova    [r0+r2], m1
-    mova         m1, [r1+r2]
-    mova         m0, [r1+r4]
-    PAVGB        m1, [r1+r2+1]
-    PAVGB        m0, [r1+r4+1]
-    add          r0, r4
-    add          r1, r4
-    PAVGB        m2, m1
-    PAVGB        m1, m0
-    PAVGB        m2, [r0]
-    PAVGB        m1, [r0+r2]
-    mova       [r0], m2
-    mova    [r0+r2], m1
-    add          r0, r4
-    sub         r3d, 4
-    jne .loop
-    RET
-
-
 ; void ff_avg_pixels16_xy2(uint8_t *block, const uint8_t *pixels, ptrdiff_t line_size, int h)
 %macro SET_PIXELS_XY2 1
-%if cpuflag(sse2)
 cglobal %1_pixels16_xy2, 4,5,8
-%else
-cglobal %1_pixels8_xy2, 4,5
-%endif
     pxor        m7, m7
     mova        m6, [pw_2]
     movu        m0, [r1]
@@ -528,8 +444,6 @@ cglobal %1_pixels8_xy2, 4,5
     RET
 %endmacro
 
-INIT_MMX mmxext
-SET_PIXELS_XY2 avg
 INIT_XMM sse2
 SET_PIXELS_XY2 put
 SET_PIXELS_XY2 avg
