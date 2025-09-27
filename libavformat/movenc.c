@@ -614,7 +614,7 @@ static int mov_write_eac3_tag(AVFormatContext *s, AVIOContext *pb, MOVTrack *tra
     }
 
     info = track->eac3_priv;
-    size = 2 + ((34 * (info->num_ind_sub + 1) + 7) >> 3);
+    size = 2 + ((32 * (info->num_ind_sub + 1) + 7) >> 3);
     buf = av_malloc(size);
     if (!buf) {
         return AVERROR(ENOMEM);
@@ -631,7 +631,7 @@ static int mov_write_eac3_tag(AVFormatContext *s, AVIOContext *pb, MOVTrack *tra
         put_bits(&pbc, 3, info->substream[i].bsmod);
         put_bits(&pbc, 3, info->substream[i].acmod);
         put_bits(&pbc, 1, info->substream[i].lfeon);
-        put_bits(&pbc, 5, 0); /* reserved */
+        put_bits(&pbc, 3, 0); /* reserved */
         put_bits(&pbc, 4, info->substream[i].num_dep_sub);
         if (!info->substream[i].num_dep_sub) {
             put_bits(&pbc, 1, 0); /* reserved */
@@ -6504,14 +6504,14 @@ static int mov_flush_fragment(AVFormatContext *s, int force)
                       av_rescale(mov->tracks[first_track].cluster[0].dts, AV_TIME_BASE, mov->tracks[first_track].timescale),
                       (has_video ? starts_with_key : mov->tracks[first_track].cluster[0].flags & MOV_SYNC_SAMPLE) ? AVIO_DATA_MARKER_SYNC_POINT : AVIO_DATA_MARKER_BOUNDARY_POINT);
 
-    for (i = 0; i < mov->nb_tracks; i++) {
+    for (i = first_track; i < mov->nb_tracks; i++) {
         MOVTrack *track = &mov->tracks[i];
         int buf_size, write_moof = 1, moof_tracks = -1;
         uint8_t *buf;
 
+        if (!track->entry)
+            continue;
         if (mov->flags & FF_MOV_FLAG_SEPARATE_MOOF) {
-            if (!track->entry)
-                continue;
             mdat_size = avio_tell(track->mdat_buf);
             moof_tracks = i;
         } else {
