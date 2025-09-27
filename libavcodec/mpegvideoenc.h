@@ -31,6 +31,7 @@
 #include <float.h>
 
 #include "libavutil/avassert.h"
+#include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "fdctdsp.h"
 #include "motion_est.h"
@@ -110,6 +111,8 @@ typedef struct MPVEncContext {
 
     int coded_score[12];
 
+    int16_t (*block)[64];       ///< points into blocks below
+
     /** precomputed matrix (combine qscale and DCT renorm) */
     int (*q_intra_matrix)[64];
     int (*q_chroma_intra_matrix)[64];
@@ -133,6 +136,8 @@ typedef struct MPVEncContext {
     int misc_bits; ///< cbp, mb_type
     int last_bits; ///< temp var used for calculating the above vars
 
+    int mb_skip_run;
+
     /* H.263 specific */
     int mb_info;                   ///< interval for outputting info about mb offsets as side data
     int prev_mb_info, last_mb_info;
@@ -152,6 +157,7 @@ typedef struct MPVEncContext {
     PutBitContext pb2;             ///< used for data partitioned VOPs
 
     /* MSMPEG4 specific */
+    int flipflop_rounding;         ///< also used for MPEG-4, H.263+
     int esc3_level_length;
 
     /* RTP specific */
@@ -173,6 +179,8 @@ typedef struct MPVEncContext {
     int (*sum_abs_dctelem)(const int16_t *block);
 
     int intra_penalty;
+
+    DECLARE_ALIGNED_32(int16_t, blocks)[2][12][64]; // for HQ mode we need to keep the best block
 } MPVEncContext;
 
 typedef struct MPVMainEncContext {

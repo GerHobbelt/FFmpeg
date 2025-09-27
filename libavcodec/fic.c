@@ -282,9 +282,6 @@ static int fic_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     int skip_cursor = ctx->skip_cursor;
     const uint8_t *sdata;
 
-    if ((ret = ff_reget_buffer(avctx, ctx->frame, 0)) < 0)
-        return ret;
-
     /* Header + at least one slice (4) */
     if (avpkt->size < FIC_HEADER_SIZE + 4) {
         av_log(avctx, AV_LOG_ERROR, "Frame data is too small.\n");
@@ -301,6 +298,10 @@ static int fic_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
             av_log(avctx, AV_LOG_WARNING, "Initial frame is skipped\n");
             return AVERROR_INVALIDDATA;
         }
+        ret = ff_reget_buffer(avctx, ctx->final_frame,
+                              FF_REGET_BUFFER_FLAG_READONLY);
+        if (ret < 0)
+            return ret;
         goto skip;
     }
 
@@ -403,6 +404,9 @@ static int fic_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
         ctx->slice_data[slice].y_off    = y_off;
     }
 
+    if ((ret = ff_reget_buffer(avctx, ctx->frame, 0)) < 0)
+        return ret;
+
     if ((ret = avctx->execute(avctx, fic_decode_slice, ctx->slice_data,
                               NULL, nslices, sizeof(ctx->slice_data[0]))) < 0)
         return ret;
@@ -422,19 +426,18 @@ static int fic_decode_frame(AVCodecContext *avctx, AVFrame *rframe,
 
     /* Draw cursor if needed. */
     if (!skip_cursor) {
-    /* Make sure we use a user-supplied buffer. */
-    if ((ret = ff_reget_buffer(avctx, ctx->final_frame, 0)) < 0) {
-        av_log(avctx, AV_LOG_ERROR, "Could not make frame writable.\n");
-        return ret;
-    }
+        /* Make frame writable. */
+        ret = ff_reget_buffer(avctx, ctx->final_frame, 0);
+        if (ret < 0)
+            return ret;
 
         fic_draw_cursor(avctx, src + CURSOR_OFFSET, cur_x, cur_y);
     }
 
 skip:
-    *got_frame = 1;
     if ((ret = av_frame_ref(rframe, ctx->final_frame)) < 0)
         return ret;
+    *got_frame = 1;
 
     return avpkt->size;
 }

@@ -29,6 +29,7 @@
 #include "mpegvideo.h"
 #include "h263.h"
 #include "h263enc.h"
+#include "mathops.h"
 #include "mpeg4video.h"
 #include "mpeg4videodata.h"
 #include "mpeg4videodefs.h"
@@ -433,7 +434,7 @@ static inline int get_b_cbp(MPVEncContext *const s, int16_t block[6][64],
         for (i = 0; i < 6; i++) {
             if (s->c.block_last_index[i] >= 0 && ((cbp >> (5 - i)) & 1) == 0) {
                 s->c.block_last_index[i] = -1;
-                s->c.bdsp.clear_block(s->c.block[i]);
+                s->c.bdsp.clear_block(s->block[i]);
             }
         }
     } else {

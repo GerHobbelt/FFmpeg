@@ -24,11 +24,14 @@
 #define AVCODEC_VC1_H
 
 #include "avcodec.h"
+#include "get_bits.h"
 #include "h264chroma.h"
 #include "mpegvideo.h"
 #include "intrax8.h"
 #include "vc1_common.h"
 #include "vc1dsp.h"
+
+#include "libavutil/mem_internal.h"
 
 #define AC_VLC_BITS 9
 
@@ -172,6 +175,7 @@ enum Imode {
  */
 typedef struct VC1Context{
     MpegEncContext s;
+    GetBitContext gb;
     IntraX8Context x8;
     H264ChromaContext h264chroma;
     VC1DSPContext vc1dsp;
@@ -397,6 +401,8 @@ typedef struct VC1Context{
 
     int parse_only;              ///< Context is used within parser
     int resync_marker;           ///< could this stream contain resync markers
+
+    DECLARE_ALIGNED_32(int16_t, blocks)[6][64];
 } VC1Context;
 
 /**
