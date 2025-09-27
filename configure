@@ -336,6 +336,7 @@ External library support:
   --disable-securetransport disable Secure Transport, needed for TLS support
                            on OSX if openssl and gnutls are not used [autodetect]
   --enable-vapoursynth     enable VapourSynth demuxer [no]
+  --enable-whisper         enable whisper filter [no]
   --disable-xlib           disable xlib [autodetect]
   --disable-zlib           disable zlib [autodetect]
 
@@ -2005,6 +2006,7 @@ EXTERNAL_LIBRARY_LIST="
     pocketsphinx
     vapoursynth
     vulkan_static
+    whisper
 "
 
 HWACCEL_AUTODETECT_LIBRARY_LIST="
@@ -2660,6 +2662,7 @@ CONFIG_EXTRA="
     tpeldsp
     vaapi_1
     vaapi_encode
+    vulkan_1_4
     vc1dsp
     videodsp
     vp3dsp
@@ -3330,7 +3333,7 @@ vp9_vdpau_hwaccel_deps="vdpau VdpPictureInfoVP9"
 vp9_vdpau_hwaccel_select="vp9_decoder"
 vp9_videotoolbox_hwaccel_deps="videotoolbox"
 vp9_videotoolbox_hwaccel_select="vp9_decoder"
-vp9_vulkan_hwaccel_deps="vulkan"
+vp9_vulkan_hwaccel_deps="vulkan vulkan_1_4"
 vp9_vulkan_hwaccel_select="vp9_decoder"
 vvc_vaapi_hwaccel_deps="vaapi VAPictureParameterBufferVVC"
 vvc_vaapi_hwaccel_select="vvc_decoder"
@@ -3352,6 +3355,7 @@ qsvdec_select="qsv"
 qsvenc_select="qsv"
 qsvvpp_select="qsv"
 vaapi_encode_deps="vaapi"
+vulkan_1_4_deps="vulkan"
 vulkan_encode_deps="vulkan"
 v4l2_m2m_deps="linux_videodev2_h sem_timedwait"
 
@@ -3404,6 +3408,7 @@ av1_qsv_encoder_deps="libvpl"
 av1_qsv_encoder_select="qsvenc"
 av1_vaapi_encoder_deps="VAEncPictureParameterBufferAV1"
 av1_vaapi_encoder_select="cbs_av1 vaapi_encode"
+av1_vulkan_encoder_deps="vulkan_1_4"
 av1_vulkan_encoder_select="cbs_av1 vulkan_encode"
 h263_v4l2m2m_decoder_deps="v4l2_m2m h263_v4l2_m2m"
 h263_v4l2m2m_encoder_deps="v4l2_m2m h263_v4l2_m2m"
@@ -4082,6 +4087,7 @@ xstack_qsv_filter_deps="libmfx"
 xstack_qsv_filter_select="qsvvpp"
 pad_vaapi_filter_deps="vaapi_1"
 drawbox_vaapi_filter_deps="vaapi_1"
+whisper_filter_deps="whisper"
 
 # examples
 avio_http_serve_files_deps="avformat avutil fork"
@@ -7161,6 +7167,8 @@ enabled libvo_amrwbenc    && require libvo_amrwbenc vo-amrwbenc/enc_if.h E_IF_in
 enabled libvorbis         && require_pkg_config libvorbis vorbis vorbis/codec.h vorbis_info_init &&
                              require_pkg_config libvorbisenc vorbisenc vorbis/vorbisenc.h vorbis_encode_init
 
+enabled whisper           && require_pkg_config whisper "whisper >= 1.7.5" whisper.h whisper_init_from_file_with_params
+
 enabled libvpx            && {
     enabled libvpx_vp8_decoder && {
         check_pkg_config libvpx_vp8_decoder "vpx >= 1.4.0" "vpx/vpx_decoder.h vpx/vp8dx.h" vpx_codec_vp8_dx ||
@@ -7515,6 +7523,9 @@ fi
 
 if disabled vulkan; then
     disable libglslang libshaderc spirv_compiler
+else
+    check_pkg_config_header_only vulkan_1_4 "vulkan >= 1.4.317" "vulkan/vulkan.h" "defined VK_VERSION_1_4" ||
+        check_cpp_condition vulkan_1_4 "vulkan/vulkan.h" "defined(VK_VERSION_1_5) || (defined(VK_VERSION_1_4) && VK_HEADER_VERSION >= 317)"
 fi
 
 if enabled x86; then

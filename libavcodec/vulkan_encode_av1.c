@@ -180,14 +180,10 @@ static int init_pic_params(AVCodecContext *avctx, FFHWBaseEncodePicture *pic,
     FFVulkanEncodeContext *ctx = &enc->common;
     FFHWBaseEncodeContext *base_ctx = &ctx->base;
 
-    FFVulkanEncodePicture *vp = pic->priv;
     VulkanEncodeAV1Picture *ap = pic->codec_priv;
     FFHWBaseEncodePicture *ref;
     VulkanEncodeAV1Picture *ap_ref;
     VkVideoReferenceSlotInfoKHR *ref_slot;
-
-    AV1RawOBU *seq_obu = &enc->seq_hdr_obu;
-    AV1RawSequenceHeader *seq = &seq_obu->obu.sequence_header;
 
     uint32_t ref_name_mask = 0x0;
     int name_slots[STD_VIDEO_AV1_REFS_PER_FRAME];
@@ -598,12 +594,11 @@ static int init_profile(AVCodecContext *avctx,
     /* Set level */
     if (avctx->level == AV_LEVEL_UNKNOWN) {
         const AV1LevelDescriptor *level;
-        float framerate;
+        float framerate = 0.0;
 
         if (avctx->framerate.num > 0 && avctx->framerate.den > 0)
-            framerate = avctx->framerate.num / avctx->framerate.den;
-        else
-            framerate = 0;
+            framerate = av_q2d(avctx->framerate);
+
         level = ff_av1_guess_level(avctx->bit_rate, enc->seq_tier,
                                    base_ctx->surface_width, base_ctx->surface_height,
                                    enc->tile_rows * enc->tile_cols,
@@ -675,9 +670,9 @@ static int init_enc_options(AVCodecContext *avctx)
         enc->initial_buffer_fullness = enc->hrd_buffer_size * 3 / 4;
     }
 
-    if (enc->common.opts.rc_mode == VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR &&
-        avctx->global_quality) {
-        enc->q_idx_p = av_clip_intp2(avctx->global_quality / FF_QP2LAMBDA, 8);
+    if (enc->common.opts.rc_mode == VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR) {
+        enc->q_idx_p = av_clip(enc->common.opts.qp,
+                               enc->caps.minQIndex, enc->caps.maxQIndex);
         if (fabs(avctx->i_quant_factor) > 0.0)
             enc->q_idx_idr =
                 av_clip((fabs(avctx->i_quant_factor) * enc->q_idx_p  +
@@ -703,7 +698,6 @@ static int init_enc_options(AVCodecContext *avctx)
 
 static av_cold int init_sequence_headers(AVCodecContext *avctx)
 {
-    int err;
     VulkanEncodeAV1Context *enc = avctx->priv_data;
     FFVulkanEncodeContext *ctx = &enc->common;
     FFVulkanContext *s = &ctx->s;
@@ -987,7 +981,7 @@ static int init_base_units(AVCodecContext *avctx)
         if (!data)
             return AVERROR(ENOMEM);
     } else {
-        av_log(avctx, AV_LOG_ERROR, "Unable to get feedback for AV1 sequence header = %lu\n",
+        av_log(avctx, AV_LOG_ERROR, "Unable to get feedback for AV1 sequence header = %"SIZE_SPECIFIER"\n",
                data_size);
         return err;
     }
@@ -1108,6 +1102,7 @@ static int write_extra_headers(AVCodecContext *avctx,
         if (err < 0)
             goto fail;
     } else {
+        err = 0;
         *data_len = 0;
     }
 
@@ -1166,7 +1161,6 @@ static av_cold int vulkan_encode_av1_init(AVCodecContext *avctx)
     int err;
     VulkanEncodeAV1Context *enc = avctx->priv_data;
     FFVulkanEncodeContext *ctx = &enc->common;
-    FFVulkanContext *s = &ctx->s;
     FFHWBaseEncodeContext *base_ctx = &ctx->base;
     int flags;
 

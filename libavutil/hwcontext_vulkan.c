@@ -2906,7 +2906,7 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
     if (p->dev_is_nvidia &&
         (((fmt->nb_images == 1) && (fmt->vk_planes > 1)) ||
          (av_pix_fmt_desc_get(hwfc->sw_format)->nb_components == 1)))
-        supported_usage &= ~VK_IMAGE_USAGE_HOST_TRANSFER_BIT;
+        supported_usage &= ~VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT;
 
     /* Image usage flags */
     if (!hwctx->usage) {
@@ -3037,7 +3037,7 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
             }
 
             if (mod_props == NULL) {
-                av_log(hwfc, AV_LOG_ERROR, "No DRM format modifier properties found for modifier 0x%016lx\n",
+                av_log(hwfc, AV_LOG_ERROR, "No DRM format modifier properties found for modifier 0x%016"PRIx64"\n",
                           drm_mod.drmFormatModifier);
                 av_free(modp.pDrmFormatModifierProperties);
                 vulkan_frame_free(hwfc, f);
