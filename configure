@@ -2498,6 +2498,7 @@ TYPES_LIST="
     kCVImageBufferTransferFunction_ITU_R_2020
     kCVImageBufferTransferFunction_SMPTE_ST_428_1
     kVTQPModulationLevel_Default
+    SecPkgContext_KeyingMaterialInfo
     socklen_t
     struct_addrinfo
     struct_group_source_req
@@ -3856,7 +3857,7 @@ tcp_protocol_select="network"
 tls_protocol_deps_any="gnutls openssl schannel securetransport libtls mbedtls"
 tls_protocol_select="tcp_protocol"
 # TODO: Support libtls, mbedtls, and gnutls.
-dtls_protocol_deps_any="openssl"
+dtls_protocol_deps_any="openssl schannel"
 dtls_protocol_select="udp_protocol"
 udp_protocol_select="network"
 udplite_protocol_select="network"
@@ -5957,7 +5958,11 @@ case $target_os in
         SLIB_INSTALL_LINKS=
         SLIB_INSTALL_EXTRA_SHLIB='$(SLIBNAME:$(SLIBSUF)=.lib)'
         SLIB_INSTALL_EXTRA_LIB='$(SLIBNAME_WITH_MAJOR:$(SLIBSUF)=.def)'
-        SHFLAGS='-dll -def:$$(@:$(SLIBSUF)=.def) -implib:$(SUBDIR)$(SLIBNAME:$(SLIBSUF)=.lib)'
+        if test $ld_type = "clang"; then
+            SHFLAGS='-Wl,-dll -Wl,-def:$$(@:$(SLIBSUF)=.def) -Wl,-implib:$(SUBDIR)$(SLIBNAME:$(SLIBSUF)=.lib)'
+        else
+            SHFLAGS='-dll -def:$$(@:$(SLIBSUF)=.def) -implib:$(SUBDIR)$(SLIBNAME:$(SLIBSUF)=.lib)'
+        fi
         enabled x86_64 && objformat="win64" || objformat="win32"
         ranlib=:
         enable dos_paths
@@ -6822,6 +6827,7 @@ check_type "windows.h d3d12video.h" "ID3D12VideoEncoder"
 test_code cc "windows.h d3d12video.h" "D3D12_FEATURE_VIDEO feature = D3D12_FEATURE_VIDEO_ENCODER_CODEC" && \
 test_code cc "windows.h d3d12video.h" "D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOURCE_REQUIREMENTS req" && enable d3d12_encoder_feature
 check_type "windows.h" "DPI_AWARENESS_CONTEXT" -D_WIN32_WINNT=0x0A00
+check_type "windows.h security.h schnlsp.h" SecPkgContext_KeyingMaterialInfo -DSECURITY_WIN32
 check_type "d3d9.h dxva2api.h" DXVA2_ConfigPictureDecode -D_WIN32_WINNT=0x0602
 check_func_headers mfapi.h MFCreateAlignedMemoryBuffer -lmfplat
 
@@ -7265,9 +7271,13 @@ enabled securetransport &&
 
 enabled schannel &&
     check_func_headers "windows.h security.h" InitializeSecurityContext -DSECURITY_WIN32 -lsecur32 &&
+    check_func_headers "windows.h ncrypt.h" NCryptOpenStorageProvider -DSECURITY_WIN32 -lncrypt &&
+    check_func_headers "windows.h wincrypt.h" CertCreateSelfSignCertificate -DSECURITY_WIN32 -lcrypt32 &&
     test_cpp_condition winerror.h "defined(SEC_I_CONTEXT_EXPIRED)" &&
-    schannel_extralibs="-lsecur32" ||
+    schannel_extralibs="-lsecur32 -lncrypt -lcrypt32" ||
         disable schannel
+
+enabled schannel && check_cc dtls_protocol "windows.h security.h schnlsp.h" "int i = SP_PROT_DTLS1_X_CLIENT;" -DSECURITY_WIN32
 
 makeinfo --version > /dev/null 2>&1 && enable makeinfo  || disable makeinfo
 enabled makeinfo \
