@@ -340,7 +340,7 @@ av_cold int ff_mpv_init_context_frame(MpegEncContext *s)
         // MN: we need these for error resilience of intra-frames
         // Allocating them unconditionally for decoders also means
         // that we don't need to reinitialize when e.g. h263_aic changes.
-        if (!FF_ALLOCZ_TYPED_ARRAY(s->dc_val_base, yc_size))
+        if (!FF_ALLOC_TYPED_ARRAY(s->dc_val_base, yc_size))
             return AVERROR(ENOMEM);
         s->dc_val[0] = s->dc_val_base + s->b8_stride + 1;
         s->dc_val[1] = s->dc_val_base + y_size + s->mb_stride + 1;
@@ -427,14 +427,15 @@ av_cold int ff_mpv_common_init(MpegEncContext *s)
     }
 
     s->context_initialized = 1;
-    memset(s->thread_context, 0, sizeof(s->thread_context));
     s->thread_context[0]   = s;
     s->slice_context_count = nb_slices;
 
 //     if (s->width && s->height) {
-    ret = ff_mpv_init_duplicate_contexts(s);
-    if (ret < 0)
-        goto fail;
+    if (!s->encoding) {
+        ret = ff_mpv_init_duplicate_contexts(s);
+        if (ret < 0)
+            goto fail;
+    }
 //     }
 
     return 0;
@@ -491,24 +492,27 @@ void ff_clean_intra_table_entries(MpegEncContext *s)
 {
     int wrap = s->b8_stride;
     int xy = s->block_index[0];
+    /* chroma */
+    unsigned uxy = s->block_index[4];
+    unsigned vxy = s->block_index[5];
+    int16_t *dc_val = s->dc_val[0];
 
     s->dc_val[0][xy           ] =
     s->dc_val[0][xy + 1       ] =
     s->dc_val[0][xy     + wrap] =
     s->dc_val[0][xy + 1 + wrap] = 1024;
+    dc_val[uxy] =
+    dc_val[vxy] = 1024;
     /* ac pred */
-    memset(s->ac_val[0][xy       ], 0, 32 * sizeof(int16_t));
-    memset(s->ac_val[0][xy + wrap], 0, 32 * sizeof(int16_t));
-    /* chroma */
-    wrap = s->mb_stride;
-    xy = s->mb_x + s->mb_y * wrap;
-    s->dc_val[1][xy] =
-    s->dc_val[2][xy] = 1024;
+    int16_t (*ac_val)[16] = s->ac_val[0];
+    av_assume(!((uintptr_t)ac_val & 0xF));
+    // Don't reset the upper-left luma block, as it will only ever be
+    // referenced by blocks from the same macroblock.
+    memset(ac_val[xy +    1], 0,     sizeof(*ac_val));
+    memset(ac_val[xy + wrap], 0, 2 * sizeof(*ac_val));
     /* ac pred */
-    memset(s->ac_val[1][xy], 0, 16 * sizeof(int16_t));
-    memset(s->ac_val[2][xy], 0, 16 * sizeof(int16_t));
-
-    s->mbintra_table[xy]= 0;
+    memset(ac_val[uxy], 0, sizeof(*ac_val));
+    memset(ac_val[vxy], 0, sizeof(*ac_val));
 }
 
 void ff_init_block_index(MpegEncContext *s){ //FIXME maybe rename

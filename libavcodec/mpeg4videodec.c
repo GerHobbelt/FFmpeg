@@ -1073,8 +1073,7 @@ try_again:
                     mot_val[1 + stride] =
                     mot_val[3 + stride] = my;
 
-                    if (s->mbintra_table[xy])
-                        ff_clean_intra_table_entries(s);
+                    ff_h263_clean_intra_table_entries(s, xy);
                     continue;
                 }
 
@@ -1103,8 +1102,7 @@ try_again:
                     mot_val[1 + stride] =
                     mot_val[3 + stride] = 0;
                 } else {
-                    if (s->mbintra_table[xy])
-                        ff_clean_intra_table_entries(s);
+                    ff_h263_clean_intra_table_entries(s, xy);
 
                     if (s->pict_type == AV_PICTURE_TYPE_S &&
                         ctx->vol_sprite_usage == GMC_SPRITE &&
@@ -1745,11 +1743,11 @@ static int mpeg4_decode_mb(MpegEncContext *s, int16_t block[6][64])
             }
         } while (cbpc == 20);
 
-        s->bdsp.clear_blocks(s->block[0]);
         dquant      = cbpc & 8;
         s->mb_intra = ((cbpc & 4) != 0);
         if (s->mb_intra)
             goto intra;
+        s->bdsp.clear_blocks(s->block[0]);
 
         if (s->pict_type == AV_PICTURE_TYPE_S &&
             ctx->vol_sprite_usage == GMC_SPRITE && (cbpc & 16) == 0)
