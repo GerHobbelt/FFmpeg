@@ -2787,14 +2787,12 @@ static int decode_vol_header(Mpeg4DecContext *ctx, GetBitContext *gb)
                     last = v;
                     j = s->idsp.idct_permutation[ff_zigzag_direct[i]];
                     s->intra_matrix[j]        = last;
-                    s->chroma_intra_matrix[j] = last;
                 }
 
                 /* replicate last value */
                 for (; i < 64; i++) {
                     int j = s->idsp.idct_permutation[ff_zigzag_direct[i]];
                     s->intra_matrix[j]        = last;
-                    s->chroma_intra_matrix[j] = last;
                 }
             }
 
@@ -2814,14 +2812,12 @@ static int decode_vol_header(Mpeg4DecContext *ctx, GetBitContext *gb)
                     last = v;
                     j = s->idsp.idct_permutation[ff_zigzag_direct[i]];
                     s->inter_matrix[j]        = v;
-                    s->chroma_inter_matrix[j] = v;
                 }
 
                 /* replicate last value */
                 for (; i < 64; i++) {
                     int j = s->idsp.idct_permutation[ff_zigzag_direct[i]];
                     s->inter_matrix[j]        = last;
-                    s->chroma_inter_matrix[j] = last;
                 }
             }
 
@@ -3269,6 +3265,7 @@ static int decode_vop_header(Mpeg4DecContext *ctx, GetBitContext *gb,
     if (get_bits1(gb) != 1) {
         if (s->avctx->debug & FF_DEBUG_PICT_INFO)
             av_log(s->avctx, AV_LOG_ERROR, "vop not coded\n");
+        s->skipped_last_frame = 1;
         return FRAME_SKIPPED;
     }
     if (ctx->new_pred)
@@ -3679,7 +3676,6 @@ int ff_mpeg4_parse_picture_header(Mpeg4DecContext *ctx, GetBitContext *gb,
 end:
     if (s->avctx->flags & AV_CODEC_FLAG_LOW_DELAY)
         s->low_delay = 1;
-    s->avctx->has_b_frames = !s->low_delay;
 
     if (s->studio_profile) {
         if (!s->avctx->bits_per_raw_sample) {
@@ -3694,6 +3690,8 @@ end:
 int ff_mpeg4_decode_picture_header(MpegEncContext *s)
 {
     Mpeg4DecContext *const ctx = (Mpeg4DecContext*)s;
+
+    s->skipped_last_frame = 0;
 
     if (ctx->bitstream_buffer) {
         int buf_size = get_bits_left(&s->gb) / 8U;
@@ -3774,15 +3772,77 @@ int ff_mpeg4_frame_end(AVCodecContext *avctx, const AVPacket *pkt)
 
 #if CONFIG_MPEG4_DECODER
 #if HAVE_THREADS
+static av_cold void clear_context(MpegEncContext *s)
+{
+    memset(&s->buffer_pools, 0, sizeof(s->buffer_pools));
+    memset(&s->next_pic, 0, sizeof(s->next_pic));
+    memset(&s->last_pic, 0, sizeof(s->last_pic));
+    memset(&s->cur_pic,  0, sizeof(s->cur_pic));
+
+    memset(s->thread_context, 0, sizeof(s->thread_context));
+
+    s->block = NULL;
+    s->blocks = NULL;
+    s->ac_val_base = NULL;
+    s->ac_val[0] =
+    s->ac_val[1] =
+    s->ac_val[2] =NULL;
+    memset(&s->sc, 0, sizeof(s->sc));
+
+    s->p_field_mv_table_base = NULL;
+    for (int i = 0; i < 2; i++)
+        for (int j = 0; j < 2; j++)
+            s->p_field_mv_table[i][j] = NULL;
+
+    s->dc_val_base = NULL;
+    s->coded_block_base = NULL;
+    s->mbintra_table = NULL;
+    s->cbp_table = NULL;
+    s->pred_dir_table = NULL;
+
+    s->mbskip_table = NULL;
+
+    s->er.error_status_table = NULL;
+    s->er.er_temp_buffer = NULL;
+    s->mb_index2xy = NULL;
+
+    s->context_initialized   = 0;
+    s->context_reinit        = 0;
+}
+
+static av_cold int update_mpvctx(MpegEncContext *s, const MpegEncContext *s1)
+{
+    AVCodecContext *avctx = s->avctx;
+    // FIXME the following leads to a data race; instead copy only
+    // the necessary fields.
+    memcpy(s, s1, sizeof(*s));
+    clear_context(s);
+
+    s->avctx = avctx;
+
+    if (s1->context_initialized) {
+        int err = ff_mpv_common_init(s);
+        if (err < 0)
+            return err;
+    }
+    return 0;
+}
+
 static int mpeg4_update_thread_context(AVCodecContext *dst,
                                        const AVCodecContext *src)
 {
     Mpeg4DecContext *s = dst->priv_data;
     const Mpeg4DecContext *s1 = src->priv_data;
     int init = s->m.context_initialized;
+    int ret;
 
-    int ret = ff_mpeg_update_thread_context(dst, src);
+    if (!init) {
+        ret = update_mpvctx(&s->m, &s1->m);
+        if (ret < 0)
+            return ret;
+    }
 
+    ret = ff_mpeg_update_thread_context(dst, src);
     if (ret < 0)
         return ret;
 
@@ -3813,6 +3873,7 @@ static int mpeg4_update_thread_context(AVCodecContext *dst,
     s->cplx_estimation_trash_p   = s1->cplx_estimation_trash_p;
     s->cplx_estimation_trash_b   = s1->cplx_estimation_trash_b;
     s->rgb                       = s1->rgb;
+    s->m.skipped_last_frame      = s1->m.skipped_last_frame;
 
     memcpy(s->sprite_shift, s1->sprite_shift, sizeof(s1->sprite_shift));
     memcpy(s->sprite_traj,  s1->sprite_traj,  sizeof(s1->sprite_traj));
