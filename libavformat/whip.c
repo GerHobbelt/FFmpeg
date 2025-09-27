@@ -579,7 +579,7 @@ static int parse_codec(AVFormatContext *s)
  */
 static int generate_sdp_offer(AVFormatContext *s)
 {
-    int ret = 0, profile, level, profile_iop;
+    int ret = 0, profile_idc = 0, level, profile_iop = 0;
     const char *acodec_name = NULL, *vcodec_name = NULL;
     AVBPrint bp;
     WHIPContext *whip = s->priv_data;
@@ -647,12 +647,12 @@ static int generate_sdp_offer(AVFormatContext *s)
     }
 
     if (whip->video_par) {
-        profile_iop = profile = whip->video_par->profile;
         level = whip->video_par->level;
         if (whip->video_par->codec_id == AV_CODEC_ID_H264) {
             vcodec_name = "H264";
-            profile_iop &= AV_PROFILE_H264_CONSTRAINED;
-            profile &= (~AV_PROFILE_H264_CONSTRAINED);
+            profile_iop |= whip->video_par->profile & AV_PROFILE_H264_CONSTRAINED ? 1 << 6 : 0;
+            profile_iop |= whip->video_par->profile & AV_PROFILE_H264_INTRA ? 1 << 4 : 0;
+            profile_idc = whip->video_par->profile & 0x00ff;
         }
 
         av_bprintf(&bp, ""
@@ -678,7 +678,7 @@ static int generate_sdp_offer(AVFormatContext *s)
             whip->video_payload_type,
             vcodec_name,
             whip->video_payload_type,
-            profile,
+            profile_idc,
             profile_iop,
             level,
             whip->video_ssrc,
@@ -1793,18 +1793,23 @@ static int whip_write_packet(AVFormatContext *s, AVPacket *pkt)
      * and RTCP like PLI requests, then respond to them.
      */
     ret = ffurl_read(whip->udp, whip->buf, sizeof(whip->buf));
-    if (ret > 0) {
-        if (is_dtls_packet(whip->buf, ret)) {
-            if ((ret = ffurl_write(whip->dtls_uc, whip->buf, ret)) < 0) {
-                av_log(whip, AV_LOG_ERROR, "Failed to handle DTLS message\n");
-                goto end;
-            }
-        }
-    } else if (ret != AVERROR(EAGAIN)) {
+    if (ret < 0) {
+        if (ret == AVERROR(EAGAIN))
+            goto write_packet;
         av_log(whip, AV_LOG_ERROR, "Failed to read from UDP socket\n");
         goto end;
     }
-
+    if (!ret) {
+        av_log(whip, AV_LOG_ERROR, "Receive EOF from UDP socket\n");
+        goto end;
+    }
+    if (is_dtls_packet(whip->buf, ret)) {
+        if ((ret = ffurl_write(whip->dtls_uc, whip->buf, ret)) < 0) {
+            av_log(whip, AV_LOG_ERROR, "Failed to handle DTLS message\n");
+            goto end;
+        }
+    }
+write_packet:
     if (whip->h264_annexb_insert_sps_pps && st->codecpar->codec_id == AV_CODEC_ID_H264) {
         if ((ret = h264_annexb_insert_sps_pps(s, pkt)) < 0) {
             av_log(whip, AV_LOG_ERROR, "Failed to insert SPS/PPS before IDR\n");
