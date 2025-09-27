@@ -46,13 +46,6 @@
 #define IFD_EXTRA_SIZE         6
 
 #define EXIF_TAG_NAME_LENGTH   32
-#define MAKERNOTE_TAG          0x927c
-#define ORIENTATION_TAG        0x112
-#define EXIFIFD_TAG            0x8769
-#define IMAGE_WIDTH_TAG        0x100
-#define IMAGE_LENGTH_TAG       0x101
-#define PIXEL_X_TAG            0xa002
-#define PIXEL_Y_TAG            0xa003
 
 struct exif_tag {
     const char name[EXIF_TAG_NAME_LENGTH];
@@ -322,12 +315,17 @@ static int exif_read_values(void *logctx, GetByteContext *gb, int le, AVExifEntr
             break;
         case AV_TIFF_UNDEFINED:
         case AV_TIFF_BYTE:
+            /* these three fields are aliased to entry->value.ptr via a union */
+            /* and entry->value.ptr will always be nonzero here */
+            av_assert0(entry->value.ubytes);
             bytestream2_get_buffer(gb, entry->value.ubytes, entry->count);
             break;
         case AV_TIFF_SBYTE:
+            av_assert0(entry->value.sbytes);
             bytestream2_get_buffer(gb, entry->value.sbytes, entry->count);
             break;
         case AV_TIFF_STRING:
+            av_assert0(entry->value.str);
             bytestream2_get_buffer(gb, entry->value.str, entry->count);
             break;
     }
@@ -471,6 +469,10 @@ static int exif_decode_tag(void *logctx, GetByteContext *gb, int le,
     av_log(logctx, AV_LOG_DEBUG, "TIFF Tag: id: 0x%04x, type: %d, count: %u, offset: %d, "
                                  "payload: %" PRIu32 "\n", entry->id, type, count, tell, payload);
 
+    /* AV_TIFF_IFD is the largest, numerically */
+    if (type > AV_TIFF_IFD)
+        return AVERROR_INVALIDDATA;
+
     is_ifd = type == AV_TIFF_IFD || ff_tis_ifd(entry->id) || entry->id == MAKERNOTE_TAG;
 
     if (is_ifd) {
@@ -541,9 +543,18 @@ static int exif_parse_ifd_list(void *logctx, GetByteContext *gb, int le,
         av_log(logctx, AV_LOG_ERROR, "not enough bytes remaining in EXIF buffer. entries: %" PRIu32 "\n", entries);
         return AVERROR_INVALIDDATA;
     }
+    if (entries > 4096) {
+        /* that is a lot of entries, probably an error */
+        av_log(logctx, AV_LOG_ERROR, "too many entries: %" PRIu32 "\n", entries);
+        return AVERROR_INVALIDDATA;
+    }
 
     ifd->count = entries;
     av_log(logctx, AV_LOG_DEBUG, "entry count for IFD: %u\n", ifd->count);
+
+    /* empty IFD is technically legal but equivalent to no metadata present */
+    if (!ifd->count)
+        goto end;
 
     if (av_size_mult(ifd->count, sizeof(*ifd->entries), &required_size) < 0)
         return AVERROR(ENOMEM);
@@ -564,6 +575,7 @@ static int exif_parse_ifd_list(void *logctx, GetByteContext *gb, int le,
             return ret;
     }
 
+end:
     /*
      * at the end of an IFD is an pointer to the next IFD
      * or zero if there are no more IFDs, which is usually the case
@@ -688,11 +700,7 @@ int av_exif_write(void *logctx, const AVExifMetadata *ifd, AVBufferRef **buffer,
     PutByteContext pb;
     int ret, off = 0;
 
-#if AV_HAVE_BIGENDIAN
-    int le = 0;
-#else
     int le = 1;
-#endif
 
     if (*buffer)
         return AVERROR(EINVAL);
@@ -729,7 +737,8 @@ int av_exif_write(void *logctx, const AVExifMetadata *ifd, AVBufferRef **buffer,
 
     if (header_mode != AV_EXIF_ASSUME_BE && header_mode != AV_EXIF_ASSUME_LE) {
         /* these constants are be32 in both cases */
-        bytestream2_put_be32(&pb, le ? EXIF_II_LONG : EXIF_MM_LONG);
+        /* le == 1 always in this case */
+        bytestream2_put_be32(&pb, EXIF_II_LONG);
         tput32(&pb, le, 8);
     }
 
@@ -803,53 +812,6 @@ int av_exif_parse_buffer(void *logctx, const uint8_t *buf, size_t size,
     }
 
     return bytestream2_tell(&gbytes);
-}
-
-static int attach_displaymatrix(void *logctx, AVFrame *frame, int orientation)
-{
-    AVFrameSideData *sd;
-    int32_t *matrix;
-    /* invalid orientation */
-    if (orientation < 2 || orientation > 8)
-        return 0;
-    sd = av_frame_new_side_data(frame, AV_FRAME_DATA_DISPLAYMATRIX, sizeof(int32_t) * 9);
-    if (!sd) {
-        av_log(logctx, AV_LOG_ERROR, "Could not allocate frame side data\n");
-        return AVERROR(ENOMEM);
-    }
-    matrix = (int32_t *) sd->data;
-
-    switch (orientation) {
-    case 2:
-        av_display_rotation_set(matrix, 0.0);
-        av_display_matrix_flip(matrix, 1, 0);
-        break;
-    case 3:
-        av_display_rotation_set(matrix, 180.0);
-        break;
-    case 4:
-        av_display_rotation_set(matrix, 180.0);
-        av_display_matrix_flip(matrix, 1, 0);
-        break;
-    case 5:
-        av_display_rotation_set(matrix, 90.0);
-        av_display_matrix_flip(matrix, 1, 0);
-        break;
-    case 6:
-        av_display_rotation_set(matrix, 90.0);
-        break;
-    case 7:
-        av_display_rotation_set(matrix, -90.0);
-        av_display_matrix_flip(matrix, 1, 0);
-        break;
-    case 8:
-        av_display_rotation_set(matrix, -90.0);
-        break;
-    default:
-        av_assert0(0);
-    }
-
-    return 0;
 }
 
 #define COLUMN_SEP(i, c) ((i) ? ((i) % (c) ? ", " : "\n") : "")
@@ -927,10 +889,10 @@ static int exif_ifd_to_dict(void *logctx, const char *prefix, const AVExifMetada
             if (ret < 0)
                 goto end;
             ret = av_dict_set(metadata, key, value, AV_DICT_DONT_STRDUP_KEY | AV_DICT_DONT_STRDUP_VAL);
-            if (ret < 0)
-                goto end;
             key = NULL;
             value = NULL;
+            if (ret < 0)
+                goto end;
         } else {
             av_freep(&key);
         }
@@ -963,68 +925,6 @@ int avpriv_exif_decode_ifd(void *logctx, const uint8_t *buf, int size,
     return ret;
 }
 #endif /* FF_API_OLD_EXIF */
-
-static int exif_attach_ifd(void *logctx, AVFrame *frame, const AVExifMetadata *ifd, AVBufferRef *og)
-{
-    const AVExifEntry *orient = NULL;
-    AVFrameSideData *sd;
-    AVExifMetadata *cloned = NULL;
-    AVBufferRef *written = NULL;
-    int ret;
-
-    for (size_t i = 0; i < ifd->count; i++) {
-        const AVExifEntry *entry = &ifd->entries[i];
-        if (entry->id == ORIENTATION_TAG && entry->count > 0 && entry->type == AV_TIFF_SHORT) {
-            orient = entry;
-            break;
-        }
-    }
-
-    if (orient && orient->value.uint[0] > 1) {
-        av_log(logctx, AV_LOG_DEBUG, "found nontrivial EXIF orientation: %" PRIu64 "\n", orient->value.uint[0]);
-        ret = attach_displaymatrix(logctx, frame, orient->value.uint[0]);
-        if (ret < 0) {
-            av_log(logctx, AV_LOG_WARNING, "unable to attach displaymatrix from EXIF\n");
-        } else {
-            const AVExifEntry *cloned_orient;
-            cloned = av_exif_clone_ifd(ifd);
-            if (!cloned) {
-                ret = AVERROR(ENOMEM);
-                goto end;
-            }
-            // will have the same offset in the clone as in the original
-            cloned_orient = &cloned->entries[orient - ifd->entries];
-            cloned_orient->value.uint[0] = 1;
-        }
-    }
-
-    ret = av_exif_ifd_to_dict(logctx, cloned ? cloned : ifd, &frame->metadata);
-    if (ret < 0)
-        return ret;
-
-    if (cloned || !og) {
-        ret = av_exif_write(logctx, cloned ? cloned : ifd, &written, AV_EXIF_TIFF_HEADER);
-        if (ret < 0)
-            goto end;
-    }
-
-    sd = av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_EXIF, written ? written : og);
-    if (!sd) {
-        if (written)
-            av_buffer_unref(&written);
-        ret = AVERROR(ENOMEM);
-        goto end;
-    }
-
-    ret = 0;
-
-end:
-    if (og && written && ret >= 0)
-        av_buffer_unref(&og); // as though we called new_side_data on og;
-    av_exif_free(cloned);
-    av_free(cloned);
-    return ret;
-}
 
 #define EXIF_COPY(fname, srcname) do { \
     size_t sz; \
@@ -1110,6 +1010,36 @@ end:
     return ret;
 }
 
+static int exif_get_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, int depth, AVExifEntry **value)
+{
+    int offset = 1;
+
+    if (!ifd || ifd->count && !ifd->entries || !value)
+        return AVERROR(EINVAL);
+
+    for (size_t i = 0; i < ifd->count; i++) {
+        if (ifd->entries[i].id == id) {
+            *value = &ifd->entries[i];
+            return i + offset;
+        }
+        if (ifd->entries[i].type == AV_TIFF_IFD) {
+            if (depth < 3) {
+                int ret = exif_get_entry(logctx, &ifd->entries[i].value.ifd, id, depth + 1, value);
+                if (ret)
+                    return ret < 0 ? ret : ret + offset;
+            }
+            offset += ifd->entries[i].value.ifd.count;
+        }
+    }
+
+    return 0;
+}
+
+int av_exif_get_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, int flags, AVExifEntry **value)
+{
+    return exif_get_entry(logctx, ifd, id, (flags & AV_EXIF_FLAG_RECURSIVE) ? 0 : INT_MAX, value);
+}
+
 int av_exif_set_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, enum AVTiffDataType type,
     uint32_t count, const uint8_t *ifd_lead, uint32_t ifd_offset, const void *value)
 {
@@ -1118,17 +1048,14 @@ int av_exif_set_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, enum AVTif
     AVExifEntry *entry = NULL;
     AVExifEntry src = { 0 };
 
-    if (!ifd || ifd->entries && !ifd->count || ifd->count && !ifd->entries
+    if (!ifd || ifd->count && !ifd->entries
              || ifd_lead && !ifd_offset || !ifd_lead && ifd_offset
              || !value || ifd->count == 0xFFFFu)
         return AVERROR(EINVAL);
 
-    for (size_t i = 0; i < ifd->count; i++) {
-        if (ifd->entries[i].id == id) {
-            entry = &ifd->entries[i];
-            break;
-        }
-    }
+    ret = av_exif_get_entry(logctx, ifd, id, 0, &entry);
+    if (ret < 0)
+        return ret;
 
     if (entry) {
         exif_free_entry(entry);
@@ -1160,6 +1087,46 @@ int av_exif_set_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, enum AVTif
         ifd->count--;
 
     return ret;
+}
+
+static int exif_remove_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, int depth)
+{
+    int32_t index = -1;
+    int ret = 0;
+
+    if (!ifd || ifd->count && !ifd->entries)
+        return AVERROR(EINVAL);
+
+    for (size_t i = 0; i < ifd->count; i++) {
+        if (ifd->entries[i].id == id) {
+            index = i;
+            break;
+        }
+        if (ifd->entries[i].type == AV_TIFF_IFD && depth < 3) {
+            ret = exif_remove_entry(logctx, &ifd->entries[i].value.ifd, id, depth + 1);
+            if (ret)
+                return ret;
+        }
+    }
+
+    if (index < 0)
+        return 0;
+    exif_free_entry(&ifd->entries[index]);
+
+    if (index == --ifd->count) {
+        if (!index)
+            av_freep(&ifd->entries);
+        return 1;
+    }
+
+    memmove(&ifd->entries[index], &ifd->entries[index + 1], (ifd->count - index) * sizeof(*ifd->entries));
+
+    return 1 + (ifd->count - index);
+}
+
+int av_exif_remove_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, int flags)
+{
+    return exif_remove_entry(logctx, ifd, id, (flags & AV_EXIF_FLAG_RECURSIVE) ? 0 : INT_MAX);
 }
 
 AVExifMetadata *av_exif_clone_ifd(const AVExifMetadata *ifd)
@@ -1194,94 +1161,84 @@ fail:
     return NULL;
 }
 
-int ff_exif_attach_ifd(void *logctx, AVFrame *frame, const AVExifMetadata *ifd)
+static const int rotation_lut[2][4] = {
+    {1, 8, 3, 6}, {4, 7, 2, 5},
+};
+
+int av_exif_matrix_to_orientation(const int32_t *matrix)
 {
-    return exif_attach_ifd(logctx, frame, ifd, NULL);
-}
-
-int ff_exif_attach_buffer(void *logctx, AVFrame *frame, AVBufferRef *data, enum AVExifHeaderMode header_mode)
-{
-    int ret;
-    AVExifMetadata ifd = { 0 };
-
-    ret = av_exif_parse_buffer(logctx, data->data, data->size, &ifd, header_mode);
-    if (ret < 0)
-        goto end;
-
-    ret = exif_attach_ifd(logctx, frame, &ifd, data);
-
-end:
-    av_exif_free(&ifd);
-    return ret;
-}
-
-static int exif_get_orientation(const int32_t *display_matrix)
-{
-    double rotation = av_display_rotation_get(display_matrix);
+    double rotation = av_display_rotation_get(matrix);
     // determinant
-    int vflip = ((int64_t)display_matrix[0] * (int64_t)display_matrix[4]
-               - (int64_t)display_matrix[1] * (int64_t)display_matrix[3]) < 0;
+    int vflip = ((int64_t)matrix[0] * (int64_t)matrix[4]
+               - (int64_t)matrix[1] * (int64_t)matrix[3]) < 0;
     if (!isfinite(rotation))
-        return 1;
-    if (vflip) {
-        if (rotation > 181.0 || rotation > -179.0 && rotation < -89.0)
-            return 5;
-        if (rotation > 91.0 || rotation < -179.0 && rotation > -269.0)
-            return 2;
-        if (rotation > 1.0 || rotation < -269.0)
-            return 7;
-        return 4;
-    } else {
-        if (rotation > 181.0 || rotation > -179.0 && rotation < -89.0)
-            return 6;
-        if (rotation > 91.0 || rotation < -179.0 && rotation > -269.0)
-            return 3;
-        if (rotation > 1.0 || rotation < -269.0)
-            return 8;
-        return 1;
-    }
+        return 0;
+    int rot = (int)(rotation + 0.5);
+    rot = (((rot % 360) + 360) % 360) / 90;
+    return rotation_lut[vflip][rot];
 }
 
-int ff_exif_get_buffer(void *logctx, const AVFrame *frame, AVBufferRef **buffer_ptr, enum AVExifHeaderMode header_mode)
+int av_exif_orientation_to_matrix(int32_t *matrix, int orientation)
+{
+    switch (orientation) {
+        case 1:
+            av_display_rotation_set(matrix, 0.0);
+            break;
+        case 2:
+            av_display_rotation_set(matrix, 0.0);
+            av_display_matrix_flip(matrix, 1, 0);
+            break;
+        case 3:
+            av_display_rotation_set(matrix, 180.0);
+            break;
+        case 4:
+            av_display_rotation_set(matrix, 180.0);
+            av_display_matrix_flip(matrix, 1, 0);
+            break;
+        case 5:
+            av_display_rotation_set(matrix, 90.0);
+            av_display_matrix_flip(matrix, 1, 0);
+            break;
+        case 6:
+            av_display_rotation_set(matrix, 90.0);
+            break;
+        case 7:
+            av_display_rotation_set(matrix, -90.0);
+            av_display_matrix_flip(matrix, 1, 0);
+            break;
+        case 8:
+            av_display_rotation_set(matrix, -90.0);
+            break;
+        default:
+            return AVERROR(EINVAL);
+    }
+
+    return 0;
+}
+
+int ff_exif_sanitize_ifd(void *logctx, const AVFrame *frame, AVExifMetadata *ifd)
 {
     int ret = 0;
-    AVBufferRef *buffer = NULL;
-    AVFrameSideData *sd_exif = NULL;
     AVFrameSideData *sd_orient = NULL;
-    AVExifMetadata ifd = { 0 };
     AVExifEntry *or = NULL;
     AVExifEntry *iw = NULL;
     AVExifEntry *ih = NULL;
     AVExifEntry *pw = NULL;
     AVExifEntry *ph = NULL;
-    AVExifMetadata *exif = NULL;
     uint64_t orientation = 1;
     uint64_t w = frame->width;
     uint64_t h = frame->height;
     int rewrite = 0;
 
-    if (!buffer_ptr || *buffer_ptr)
-        return AVERROR(EINVAL);
-
-    sd_exif = av_frame_get_side_data(frame, AV_FRAME_DATA_EXIF);
     sd_orient = av_frame_get_side_data(frame, AV_FRAME_DATA_DISPLAYMATRIX);
 
-    if (!sd_exif && !sd_orient)
-        return 0;
-
     if (sd_orient)
-        orientation = exif_get_orientation((int32_t *) sd_orient->data);
+        orientation = av_exif_matrix_to_orientation((int32_t *) sd_orient->data);
     if (orientation != 1)
         av_log(logctx, AV_LOG_DEBUG, "matrix contains nontrivial EXIF orientation: %" PRIu64 "\n", orientation);
 
-    if (sd_exif) {
-        ret = av_exif_parse_buffer(logctx, sd_exif->data, sd_exif->size, &ifd, AV_EXIF_TIFF_HEADER);
-        if (ret < 0)
-            goto end;
-    }
-
-    for (size_t i = 0; i < ifd.count; i++) {
-        AVExifEntry *entry = &ifd.entries[i];
+    for (size_t i = 0; i < ifd->count; i++) {
+        AVExifEntry *entry = &ifd->entries[i];
         if (entry->id == ORIENTATION_TAG && entry->count > 0 && entry->type == AV_TIFF_SHORT) {
             or = entry;
             continue;
@@ -1295,7 +1252,7 @@ int ff_exif_get_buffer(void *logctx, const AVFrame *frame, AVBufferRef **buffer_
             continue;
         }
         if (entry->id == EXIFIFD_TAG && entry->type == AV_TIFF_IFD) {
-            exif = &entry->value.ifd;
+            AVExifMetadata *exif = &entry->value.ifd;
             for (size_t j = 0; j < exif->count; j++) {
                 AVExifEntry *exifentry = &exif->entries[j];
                 if (exifentry->id == PIXEL_X_TAG && exifentry->count > 0 && exifentry->type == AV_TIFF_SHORT) {
@@ -1332,32 +1289,39 @@ int ff_exif_get_buffer(void *logctx, const AVFrame *frame, AVBufferRef **buffer_
     }
     if (!or && orientation != 1) {
         rewrite = 1;
-        ret = av_exif_set_entry(logctx, &ifd, ORIENTATION_TAG, AV_TIFF_SHORT, 1, NULL, 0, &orientation);
+        ret = av_exif_set_entry(logctx, ifd, ORIENTATION_TAG, AV_TIFF_SHORT, 1, NULL, 0, &orientation);
         if (ret < 0)
             goto end;
     }
     if (!iw && w) {
         rewrite = 1;
-        ret = av_exif_set_entry(logctx, &ifd, IMAGE_WIDTH_TAG, AV_TIFF_LONG, 1, NULL, 0, &w);
+        ret = av_exif_set_entry(logctx, ifd, IMAGE_WIDTH_TAG, AV_TIFF_LONG, 1, NULL, 0, &w);
         if (ret < 0)
             goto end;
     }
     if (!ih && h) {
         rewrite = 1;
-        ret = av_exif_set_entry(logctx, &ifd, IMAGE_LENGTH_TAG, AV_TIFF_LONG, 1, NULL, 0, &h);
+        ret = av_exif_set_entry(logctx, ifd, IMAGE_LENGTH_TAG, AV_TIFF_LONG, 1, NULL, 0, &h);
         if (ret < 0)
             goto end;
     }
     if (!pw && w && w < 0xFFFFu || !ph && h && h < 0xFFFFu) {
+        AVExifMetadata *exif;
+        AVExifEntry *exif_entry;
+        int exif_found = av_exif_get_entry(logctx, ifd, EXIFIFD_TAG, 0, &exif_entry);
         rewrite = 1;
-        if (!exif) {
+        if (exif_found < 0)
+            goto end;
+        if (exif_found > 0) {
+            exif = &exif_entry->value.ifd;
+        } else {
             AVExifMetadata exif_new = { 0 };
-            ret = av_exif_set_entry(logctx, &ifd, EXIFIFD_TAG, AV_TIFF_IFD, 1, NULL, 0, &exif_new);
+            ret = av_exif_set_entry(logctx, ifd, EXIFIFD_TAG, AV_TIFF_IFD, 1, NULL, 0, &exif_new);
             if (ret < 0) {
                 av_exif_free(&exif_new);
                 goto end;
             }
-            exif = &ifd.entries[ifd.count - 1].value.ifd;
+            exif = &ifd->entries[ifd->count - 1].value.ifd;
         }
         if (!pw && w && w < 0xFFFFu) {
             ret = av_exif_set_entry(logctx, exif, PIXEL_X_TAG, AV_TIFF_SHORT, 1, NULL, 0, &w);
@@ -1369,6 +1333,37 @@ int ff_exif_get_buffer(void *logctx, const AVFrame *frame, AVBufferRef **buffer_
             if (ret < 0)
                 goto end;
         }
+    }
+
+    return rewrite;
+
+end:
+    return ret;
+}
+
+int ff_exif_get_buffer(void *logctx, const AVFrame *frame, AVBufferRef **buffer_ptr, enum AVExifHeaderMode header_mode)
+{
+    AVFrameSideData *sd_exif = NULL;
+    AVBufferRef *buffer = NULL;
+    AVExifMetadata ifd = { 0 };
+    int ret = 0;
+    int rewrite = 0;
+
+    if (!buffer_ptr || *buffer_ptr)
+        return AVERROR(EINVAL);
+
+    sd_exif = av_frame_get_side_data(frame, AV_FRAME_DATA_EXIF);
+    if (!sd_exif)
+        return 0;
+
+    ret = av_exif_parse_buffer(logctx, sd_exif->data, sd_exif->size, &ifd, AV_EXIF_TIFF_HEADER);
+    if (ret < 0)
+        goto end;
+
+    rewrite = ff_exif_sanitize_ifd(logctx, frame, &ifd);
+    if (rewrite < 0) {
+        ret = rewrite;
+        goto end;
     }
 
     if (rewrite) {
@@ -1384,6 +1379,9 @@ int ff_exif_get_buffer(void *logctx, const AVFrame *frame, AVBufferRef **buffer_
             goto end;
         }
     }
+
+    av_exif_free(&ifd);
+    return rewrite;
 
 end:
     av_exif_free(&ifd);
