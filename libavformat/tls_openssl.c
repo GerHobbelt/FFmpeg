@@ -533,7 +533,7 @@ int ff_dtls_export_materials(URLContext *h, char *dtls_srtp_materials, size_t ma
     ret = SSL_export_keying_material(c->ssl, dtls_srtp_materials, materials_sz,
         dst, strlen(dst), NULL, 0, 0);
     if (!ret) {
-        av_log(c, AV_LOG_ERROR, "TLS: Failed to export SRTP material, %s\n", openssl_get_error(c));
+        av_log(c, AV_LOG_ERROR, "Failed to export SRTP material, %s\n", openssl_get_error(c));
         return -1;
     }
     return 0;
@@ -578,7 +578,8 @@ static int tls_close(URLContext *h)
     }
     if (c->ctx)
         SSL_CTX_free(c->ctx);
-    ffurl_closep(&c->tls_shared.tcp);
+    if (!c->tls_shared.external_sock)
+        ffurl_closep(c->tls_shared.is_dtls ? &c->tls_shared.udp : &c->tls_shared.tcp);
     if (c->url_bio_method)
         BIO_meth_free(c->url_bio_method);
     return 0;
@@ -702,8 +703,7 @@ static int dtls_handshake(URLContext *h)
     int ret = 1, r0, r1;
     TLSContext *p = h->priv_data;
 
-    int was_nonblock = h->flags & AVIO_FLAG_NONBLOCK;
-    h->flags &= ~AVIO_FLAG_NONBLOCK;
+    p->tls_shared.udp->flags &= ~AVIO_FLAG_NONBLOCK;
 
     r0 = SSL_do_handshake(p->ssl);
     if (r0 <= 0) {
@@ -718,14 +718,13 @@ static int dtls_handshake(URLContext *h)
         av_log(p, AV_LOG_TRACE, "Handshake success, r0=%d\n", r0);
     }
 
-    if (SSL_is_init_finished(p->ssl) != 1)
+    /* Check whether the handshake is completed. */
+    if (SSL_is_init_finished(p->ssl) != TLS_ST_OK)
         goto end;
 
     ret = 0;
     p->tls_shared.state = DTLS_STATE_FINISHED;
 end:
-    if (was_nonblock)
-        h->flags |= AVIO_FLAG_NONBLOCK;
     return ret;
 }
 
@@ -770,7 +769,7 @@ static av_cold int openssl_init_ca_key_cert(URLContext *h)
     } else if (c->key_buf) {
         pkey = pkey_from_pem_string(c->key_buf, 1);
         if (SSL_CTX_use_PrivateKey(p->ctx, pkey) != 1) {
-            av_log(p, AV_LOG_ERROR, "TLS: Init SSL_CTX_use_PrivateKey failed, %s\n", openssl_get_error(p));
+            av_log(p, AV_LOG_ERROR, "Init SSL_CTX_use_PrivateKey failed, %s\n", openssl_get_error(p));
             ret = AVERROR(EINVAL);
             goto fail;
         }
@@ -839,7 +838,7 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
 
     /* Setup the SRTP context */
     if (SSL_CTX_set_tlsext_use_srtp(p->ctx, profiles)) {
-        av_log(p, AV_LOG_ERROR, "TLS: Init SSL_CTX_set_tlsext_use_srtp failed, profiles=%s, %s\n",
+        av_log(p, AV_LOG_ERROR, "Init SSL_CTX_set_tlsext_use_srtp failed, profiles=%s, %s\n",
             profiles, openssl_get_error(p));
         ret = AVERROR(EINVAL);
         return ret;
@@ -880,8 +879,11 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
         }
     }
 
-    /* Setup DTLS as passive, which is server role. */
-    c->listen ? SSL_set_accept_state(p->ssl) : SSL_set_connect_state(p->ssl);
+    /* This seems to be neccesary despite explicitly setting client/server method above. */
+    if (c->listen)
+        SSL_set_accept_state(p->ssl);
+    else
+        SSL_set_connect_state(p->ssl);
 
     /**
      * During initialization, we only need to call SSL_do_handshake once because SSL_read consumes
@@ -898,29 +900,16 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
         ret = dtls_handshake(h);
         // Fatal SSL error, for example, no available suite when peer is DTLS 1.0 while we are DTLS 1.2.
         if (ret < 0) {
-            av_log(p, AV_LOG_ERROR, "TLS: Failed to drive SSL context, ret=%d\n", ret);
+            av_log(p, AV_LOG_ERROR, "Failed to drive SSL context, ret=%d\n", ret);
             return AVERROR(EIO);
         }
     }
 
-    av_log(p, AV_LOG_VERBOSE, "TLS: Setup ok, MTU=%d\n", p->tls_shared.mtu);
+    av_log(p, AV_LOG_VERBOSE, "Setup ok, MTU=%d\n", p->tls_shared.mtu);
 
     ret = 0;
 fail:
     return ret;
-}
-
-/**
- * Cleanup the DTLS context.
- */
-static av_cold int dtls_close(URLContext *h)
-{
-    TLSContext *ctx = h->priv_data;
-    SSL_free(ctx->ssl);
-    SSL_CTX_free(ctx->ctx);
-    av_freep(&ctx->tls_shared.cert_buf);
-    av_freep(&ctx->tls_shared.key_buf);
-    return 0;
 }
 
 static int tls_open(URLContext *h, const char *uri, int flags, AVDictionary **options)
@@ -1071,7 +1060,7 @@ const URLProtocol ff_dtls_protocol = {
     .name           = "dtls",
     .url_open2      = dtls_start,
     .url_handshake  = dtls_handshake,
-    .url_close      = dtls_close,
+    .url_close      = tls_close,
     .url_read       = tls_read,
     .url_write      = tls_write,
     .url_get_file_handle = tls_get_file_handle,
