@@ -361,6 +361,22 @@ static int h263_encode_picture_header(MPVMainEncContext *const m)
     return 0;
 }
 
+void ff_h263_mpeg4_reset_dc(MPVEncContext *s)
+{
+    int16_t *dc = s->c.dc_val;
+
+    // The "- 1" is for the top-left entry
+    const int l_xy = s->c.block_index[2];
+    for (int i = l_xy - 2 * s->c.b8_stride - 1; i < l_xy; i += 2)
+        AV_WN32A(dc + i, 1024 << 16 | 1024);
+
+    const int u_xy = s->c.block_index[4];
+    const int v_xy = s->c.block_index[5];
+    int16_t *dc2 = dc + v_xy - u_xy;
+    for (int i = u_xy - s->c.mb_stride - 1; i < u_xy; ++i)
+        dc[i] = dc2[i] = 1024;
+}
+
 /**
  * Encode a group of blocks header.
  */
@@ -557,38 +573,20 @@ static void h263_encode_block(MPVEncContext *const s, int16_t block[], int n)
 /* Encode MV differences on H.263+ with Unrestricted MV mode */
 static void h263p_encode_umotion(PutBitContext *pb, int val)
 {
-    short sval = 0;
-    short i = 0;
-    short n_bits = 0;
-    short temp_val;
-    int code = 0;
-    int tcode;
-
     if ( val == 0)
         put_bits(pb, 1, 1);
-    else if (val == 1)
-        put_bits(pb, 3, 0);
-    else if (val == -1)
-        put_bits(pb, 3, 2);
     else {
+        unsigned code = (val < 0) << 1;
+        unsigned aval = val < 0 ? -val : val;
+        unsigned n_bits = 2;
 
-        sval = ((val < 0) ? (short)(-val):(short)val);
-        temp_val = sval;
-
-        while (temp_val != 0) {
-            temp_val = temp_val >> 1;
-            n_bits++;
+        while (aval != 1) { // The leading digit is implicitly coded via length
+            unsigned tmp = (aval & 1) << 1 | 1;
+            aval  >>= 1;
+            code   |= tmp << n_bits;
+            n_bits += 2;
         }
-
-        i = n_bits - 1;
-        while (i > 0) {
-            tcode = (sval & (1 << (i-1))) >> (i-1);
-            tcode = (tcode << 1) | 1;
-            code = (code << 2) | tcode;
-            i--;
-        }
-        code = ((code << 1) | (val < 0)) << 1;
-        put_bits(pb, (2*n_bits)+1, code);
+        put_bits(pb, n_bits + 1, code);
     }
 }
 
@@ -596,7 +594,7 @@ static int h263_pred_dc(MPVEncContext *const s, int n, int16_t **dc_val_ptr)
 {
     const int wrap = s->c.block_wrap[n];
     const int xy   = s->c.block_index[n];
-    int16_t *const dc_val = s->c.dc_val[0] + xy;
+    int16_t *const dc_val = s->c.dc_val + xy;
     int pred_dc;
 
     /* find prediction */
@@ -606,11 +604,6 @@ static int h263_pred_dc(MPVEncContext *const s, int n, int16_t **dc_val_ptr)
     int a = dc_val[-1];
     int c = dc_val[-wrap];
 
-    /* No prediction outside GOB boundary */
-    if (s->c.first_slice_line && n != 3) {
-        if (n != 2) c = 1024;
-        if (n != 1 && s->c.mb_x == s->c.resync_mb_x) a = 1024;
-    }
     /* just DC prediction */
     if (a != 1024 && c != 1024)
         pred_dc = (a + c) >> 1;
