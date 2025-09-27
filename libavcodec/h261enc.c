@@ -77,7 +77,7 @@ static int h261_encode_picture_header(MPVMainEncContext *const m)
 
     put_bits(&s->pb, 20, 0x10); /* PSC */
 
-    temp_ref = s->c.picture_number * 30000LL * s->c.avctx->time_base.num /
+    temp_ref = s->picture_number * 30000LL * s->c.avctx->time_base.num /
                (1001LL * s->c.avctx->time_base.den);   // FIXME maybe this should use a timestamp
     put_sbits(&s->pb, 5, temp_ref); /* TemporalReference */
 
@@ -266,9 +266,9 @@ static void h261_encode_mb(MPVEncContext *const s, int16_t block[6][64],
     if (!s->c.mb_intra) {
         com->mtype++;
 
-        if (mvd || s->c.loop_filter)
+        if (mvd || s->loop_filter)
             com->mtype += 3;
-        if (s->c.loop_filter)
+        if (s->loop_filter)
             com->mtype += 3;
         if (cbp)
             com->mtype++;

@@ -391,7 +391,7 @@ static inline int mpeg4_is_resync(Mpeg4DecContext *ctx)
 
     while (v <= 0xFF) {
         if (h->c.pict_type == AV_PICTURE_TYPE_B ||
-            (v >> (8 - h->c.pict_type) != 1) || h->c.partitioned_frame)
+            (v >> (8 - h->c.pict_type) != 1) || h->partitioned_frame)
             break;
         skip_bits(&h->gb, 8 + h->c.pict_type);
         bits_count += 8 + h->c.pict_type;
@@ -1395,7 +1395,7 @@ static inline int mpeg4_decode_block(Mpeg4DecContext *ctx, int16_t *block,
         // FIXME add short header support
         if (use_intra_dc_vlc) {
             /* DC coef */
-            if (h->c.partitioned_frame) {
+            if (h->partitioned_frame) {
                 level = h->c.dc_val[h->c.block_index[n]];
                 if (n < 4)
                     level = FASTDIV((level + (h->c.y_dc_scale >> 1)), h->c.y_dc_scale);
@@ -2699,7 +2699,7 @@ static int decode_vol_header(Mpeg4DecContext *ctx, GetBitContext *gb)
     } else {
         /* is setting low delay flag only once the smartest thing to do?
          * low delay detection will not be overridden. */
-        if (h->c.picture_number == 0) {
+        if (h->picture_number == 0) {
             switch (ctx->vo_type) {
             case SIMPLE_VO_TYPE:
             case ADV_SIMPLE_VO_TYPE:
@@ -2938,8 +2938,8 @@ no_cplx_est:
 
         ctx->resync_marker = !get_bits1(gb); /* resync_marker_disabled */
 
-        h->c.data_partitioning = get_bits1(gb);
-        if (h->c.data_partitioning)
+        h->data_partitioning = get_bits1(gb);
+        if (h->data_partitioning)
             ctx->rvlc = get_bits1(gb);
 
         if (vo_ver_id != 1) {
@@ -2996,7 +2996,7 @@ no_cplx_est:
                h->c.low_delay,
                ctx->scalability ? "scalability " :"" ,
                h->c.quarter_sample ? "qpel " : "",
-               h->c.data_partitioning ? "partition " : "",
+               h->data_partitioning ? "partition " : "",
                ctx->rvlc ? "rvlc " : ""
         );
     }
@@ -3222,8 +3222,8 @@ static int decode_vop_header(Mpeg4DecContext *ctx, GetBitContext *gb,
         h->c.low_delay = 0;
     }
 
-    h->c.partitioned_frame = h->c.data_partitioning && h->c.pict_type != AV_PICTURE_TYPE_B;
-    if (h->c.partitioned_frame)
+    h->partitioned_frame = h->data_partitioning && h->c.pict_type != AV_PICTURE_TYPE_B;
+    if (h->partitioned_frame)
         h->decode_mb = mpeg4_decode_partitioned_mb;
     else
         h->decode_mb = mpeg4_decode_mb;
@@ -3437,7 +3437,7 @@ static int decode_vop_header(Mpeg4DecContext *ctx, GetBitContext *gb,
                    h->c.pict_type == AV_PICTURE_TYPE_I ? 'I' : (h->c.pict_type == AV_PICTURE_TYPE_P ? 'P' : (h->c.pict_type == AV_PICTURE_TYPE_B ? 'B' : 'S')),
                    gb->size_in_bits,h->c.progressive_sequence, h->c.alternate_scan,
                    h->c.top_field_first, h->c.quarter_sample ? 'q' : 'h',
-                   h->c.data_partitioning, ctx->resync_marker,
+                   h->data_partitioning, ctx->resync_marker,
                    ctx->num_sprite_warping_points, ctx->sprite_warping_accuracy,
                    1 - h->c.no_rounding, ctx->vo_type,
                    ctx->vol_control_parameters ? " VOLC" : " ", ctx->intra_dc_threshold,
@@ -3472,13 +3472,13 @@ end:
      * (divx4/xvid/opendivx). Note we cannot detect divx5 without B-frames
      * easily (although it's buggy too) */
     if (ctx->vo_type == 0 && ctx->vol_control_parameters == 0 &&
-        ctx->divx_version == -1 && h->c.picture_number == 0) {
+        ctx->divx_version == -1 && h->picture_number == 0) {
         av_log(h->c.avctx, AV_LOG_WARNING,
                "looks like this file was encoded with (divx4/(old)xvid/opendivx) -> forcing low_delay flag\n");
         h->c.low_delay = 1;
     }
 
-    h->c.picture_number++;  // better than pic number==0 always ;)
+    h->picture_number++;  // better than pic number==0 always ;)
 
     if (h->c.workaround_bugs & FF_BUG_EDGE) {
         h->c.h_edge_pos = h->c.width;
@@ -3513,7 +3513,7 @@ static int decode_studio_vop_header(Mpeg4DecContext *ctx, GetBitContext *gb)
     if (get_bits_left(gb) <= 32)
         return 0;
 
-    h->c.partitioned_frame = 0;
+    h->partitioned_frame = 0;
     h->c.interlaced_dct = 0;
     h->decode_mb = mpeg4_decode_studio_mb;
 
@@ -3898,7 +3898,7 @@ static int mpeg4_update_thread_context(AVCodecContext *dst,
     s->sprite_brightness_change  = s1->sprite_brightness_change;
     s->sprite_warping_accuracy   = s1->sprite_warping_accuracy;
     s->num_sprite_warping_points = s1->num_sprite_warping_points;
-    s->h.c.data_partitioning     = s1->h.c.data_partitioning;
+    s->h.data_partitioning       = s1->h.data_partitioning;
     s->mpeg_quant                = s1->mpeg_quant;
     s->rvlc                      = s1->rvlc;
     s->resync_marker             = s1->resync_marker;
@@ -3922,6 +3922,8 @@ static int mpeg4_update_thread_context(AVCodecContext *dst,
 
     s->h.skipped_last_frame      = s1->h.skipped_last_frame;
     s->h.padding_bug_score       = s1->h.padding_bug_score; // FIXME: racy
+
+    s->h.picture_number          = s1->h.picture_number;
 
     memcpy(s->sprite_shift, s1->sprite_shift, sizeof(s1->sprite_shift));
     memcpy(s->sprite_traj,  s1->sprite_traj,  sizeof(s1->sprite_traj));

@@ -155,7 +155,6 @@ av_cold int ff_h263_decode_init(AVCodecContext *avctx)
 #endif
 #if CONFIG_FLV_DECODER
     case AV_CODEC_ID_FLV1:
-        s->h263_flv = 1;
         h->decode_header = ff_flv_decode_picture_header;
         break;
 #endif
@@ -182,15 +181,15 @@ av_cold int ff_h263_decode_init(AVCodecContext *avctx)
     return 0;
 }
 
-static void report_decode_progress(MpegEncContext *s)
+static void report_decode_progress(H263DecContext *const h)
 {
-    if (s->pict_type != AV_PICTURE_TYPE_B && !s->partitioned_frame && !s->er.error_occurred)
-        ff_thread_progress_report(&s->cur_pic.ptr->progress, s->mb_y);
+    if (h->c.pict_type != AV_PICTURE_TYPE_B && !h->partitioned_frame && !h->c.er.error_occurred)
+        ff_thread_progress_report(&h->c.cur_pic.ptr->progress, h->c.mb_y);
 }
 
 static int decode_slice(H263DecContext *const h)
 {
-    const int part_mask = h->c.partitioned_frame
+    const int part_mask = h->partitioned_frame
                           ? (ER_AC_END | ER_AC_ERROR) : 0x7F;
     const int mb_size   = 16 >> h->c.avctx->lowres;
     int ret;
@@ -215,7 +214,7 @@ static int decode_slice(H263DecContext *const h)
         return ret;
     }
 
-    if (h->c.partitioned_frame) {
+    if (h->partitioned_frame) {
         const int qscale = h->c.qscale;
 
         if (CONFIG_MPEG4_DECODER && h->c.codec_id == AV_CODEC_ID_MPEG4)
@@ -232,7 +231,7 @@ static int decode_slice(H263DecContext *const h)
     for (; h->c.mb_y < h->c.mb_height; h->c.mb_y++) {
         /* per-row end of slice checks */
         if (h->c.msmpeg4_version != MSMP4_UNUSED) {
-            if (h->c.resync_mb_y + h->c.slice_height == h->c.mb_y) {
+            if (h->c.resync_mb_y + h->slice_height == h->c.mb_y) {
                 ff_er_add_slice(&h->c.er, h->c.resync_mb_x, h->c.resync_mb_y,
                                 h->c.mb_x - 1, h->c.mb_y, ER_MB_END);
 
@@ -281,7 +280,7 @@ static int decode_slice(H263DecContext *const h)
                 const int xy = h->c.mb_x + h->c.mb_y * h->c.mb_stride;
                 if (ret == SLICE_END) {
                     ff_mpv_reconstruct_mb(&h->c, h->block);
-                    if (h->c.loop_filter)
+                    if (h->loop_filter)
                         ff_h263_loop_filter(&h->c);
 
                     ff_er_add_slice(&h->c.er, h->c.resync_mb_x, h->c.resync_mb_y,
@@ -291,7 +290,7 @@ static int decode_slice(H263DecContext *const h)
 
                     if (++h->c.mb_x >= h->c.mb_width) {
                         h->c.mb_x = 0;
-                        report_decode_progress(&h->c);
+                        report_decode_progress(h);
                         ff_mpeg_draw_horiz_band(&h->c, h->c.mb_y * mb_size, mb_size);
                         h->c.mb_y++;
                     }
@@ -314,11 +313,11 @@ static int decode_slice(H263DecContext *const h)
             }
 
             ff_mpv_reconstruct_mb(&h->c, h->block);
-            if (h->c.loop_filter)
+            if (h->loop_filter)
                 ff_h263_loop_filter(&h->c);
         }
 
-        report_decode_progress(&h->c);
+        report_decode_progress(h);
         ff_mpeg_draw_horiz_band(&h->c, h->c.mb_y * mb_size, mb_size);
 
         h->c.mb_x = 0;
@@ -331,7 +330,7 @@ static int decode_slice(H263DecContext *const h)
         (h->c.workaround_bugs & FF_BUG_AUTODETECT) &&
         get_bits_left(&h->gb) >= 48                &&
         show_bits(&h->gb, 24) == 0x4010            &&
-        !h->c.data_partitioning)
+        !h->data_partitioning)
         h->padding_bug_score += 32;
 
     /* try to detect the padding bug */
@@ -339,7 +338,7 @@ static int decode_slice(H263DecContext *const h)
         (h->c.workaround_bugs & FF_BUG_AUTODETECT) &&
         get_bits_left(&h->gb) >= 0                 &&
         get_bits_left(&h->gb) < 137                &&
-        !h->c.data_partitioning) {
+        !h->data_partitioning) {
         const int bits_count = get_bits_count(&h->gb);
         const int bits_left  = h->gb.size_in_bits - bits_count;
 
@@ -365,7 +364,7 @@ static int decode_slice(H263DecContext *const h)
         get_bits_left(&h->gb) < 300                &&
         h->c.pict_type == AV_PICTURE_TYPE_I        &&
         show_bits(&h->gb, 8) == 0                  &&
-        !h->c.data_partitioning) {
+        !h->data_partitioning) {
 
         h->padding_bug_score += 32;
     }
@@ -380,7 +379,7 @@ static int decode_slice(H263DecContext *const h)
 
     if (h->c.workaround_bugs & FF_BUG_AUTODETECT) {
         if (
-            (h->padding_bug_score > -2 && !h->c.data_partitioning))
+            (h->padding_bug_score > -2 && !h->data_partitioning))
             h->c.workaround_bugs |= FF_BUG_NO_PADDING;
         else
             h->c.workaround_bugs &= ~FF_BUG_NO_PADDING;
@@ -552,7 +551,8 @@ int ff_h263_decode_frame(AVCodecContext *avctx, AVFrame *pict,
             return ret;
     }
 
-    ff_mpeg_er_frame_start(s);
+    ff_mpv_er_frame_start_ext(s, h->partitioned_frame,
+                              s->pp_time, s->pb_time);
 
     /* the second part of the wmv2 header contains the MB skip bits which
      * are stored in current_picture->mb_type which is not available before
@@ -574,8 +574,8 @@ int ff_h263_decode_frame(AVCodecContext *avctx, AVFrame *pict,
     slice_ret = decode_slice(h);
     while (h->c.mb_y < h->c.mb_height) {
         if (h->c.msmpeg4_version != MSMP4_UNUSED) {
-            if (h->c.slice_height == 0 || h->c.mb_x != 0 || slice_ret < 0 ||
-                (h->c.mb_y % h->c.slice_height) != 0 || get_bits_left(&h->gb) < 0)
+            if (h->slice_height == 0 || h->c.mb_x != 0 || slice_ret < 0 ||
+                (h->c.mb_y % h->slice_height) != 0 || get_bits_left(&h->gb) < 0)
                 break;
         } else {
             int prev_x = h->c.mb_x, prev_y = h->c.mb_y;

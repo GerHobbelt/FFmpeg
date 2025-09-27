@@ -1581,9 +1581,6 @@ static int finish_frame(AVCodecContext *avctx, AVFrame *pict)
     ff_mpv_frame_end(s);
     r->mb_num_left = 0;
 
-    if (HAVE_THREADS && (s->avctx->active_thread_type & FF_THREAD_FRAME))
-        ff_thread_progress_report(&s->cur_pic.ptr->progress, INT_MAX);
-
     if (s->pict_type == AV_PICTURE_TYPE_B) {
         if ((ret = av_frame_ref(pict, s->cur_pic.ptr->f)) < 0)
             return ret;
@@ -1803,13 +1800,12 @@ int ff_rv34_decode_frame(AVCodecContext *avctx, AVFrame *pict,
             *got_picture_ptr = ret;
         } else if (HAVE_THREADS &&
                    (s->avctx->active_thread_type & FF_THREAD_FRAME)) {
-            av_log(avctx, AV_LOG_INFO, "marking unfished frame as finished\n");
+            av_log(avctx, AV_LOG_INFO, "marking unfinished frame as finished\n");
             /* always mark the current frame as finished, frame-mt supports
              * only complete frames */
             ff_er_frame_end(&s->er, NULL);
             ff_mpv_frame_end(s);
             r->mb_num_left = 0;
-            ff_thread_progress_report(&s->cur_pic.ptr->progress, INT_MAX);
             return AVERROR_INVALIDDATA;
         }
     }
