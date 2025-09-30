@@ -12,6 +12,10 @@ class conanRecipe(ConanFile):
             self.options["libvpx"].shared = True
         if self.settings.os == "Macos":
             self.options["openssl"].shared = False
+        
+        if self.settings.os == "Linux":
+            self.options["libx265"].shared = True
+            self.options["libx264"].shared = True
 
     def requirements(self):
         self.requires("videoai/1.9.51-tensorrt1011")
@@ -22,6 +26,10 @@ class conanRecipe(ConanFile):
         if self.settings.os == "Macos" or self.settings.os == "Linux":
             self.requires("libvpx/1.14.1") #libvpx is static on Windows
             self.requires("libaom-av1/3.5.0")
+        
+        if self.settings.os == "Linux":
+            self.requires("libx264/cci.20240224")
+            self.requires("libx265/3.4")
             
     def package_id(self):
         self.info.requires["videoai"].minor_mode()
