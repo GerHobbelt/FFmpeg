@@ -62,7 +62,7 @@ resources:
       type: github
       endpoint: TopazLabs
       name: TopazLabs/topaz-conan-dev
-      ref: feature/upload
+      ref: main
     - repository: nv-codec-headers
       type: github
       endpoint: TopazLabs
