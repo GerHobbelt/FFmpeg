@@ -16,6 +16,9 @@ class conanRecipe(ConanFile):
             self.options["libvpx"].shared = True
         if self.settings.os == "Macos":
             self.options["openssl"].shared = False
+        if self.settings.os == "Linux":
+            self.options["libx265"].shared = True
+            self.options["libx264"].shared = True
 
     def build_requirements(self):
         if self.settings.os == "Macos" and self.settings.arch == "x86_64":
@@ -35,6 +38,10 @@ class conanRecipe(ConanFile):
             self.requires("amf/1.4.36")
             self.requires("libvpl/2025.4.18")
             self.requires("zlib-mt/1.2.13")
+        if self.settings.os == "Linux":
+            self.requires("libx264/cci.20240224")
+            self.requires("libx265/3.4")
+
     def generate(self):
         for dep in self.dependencies.values():
             if dep.package_folder:
