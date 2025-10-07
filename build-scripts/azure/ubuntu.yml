@@ -26,10 +26,9 @@ steps:
       git apply --verbose ./build-scripts/configure-aom.patch
       git apply --verbose ./build-scripts/linux/configure-x264-x265.patch
       echo "Patches applied successfully!"
-      echo "Verifying x264/x265 configuration changes..."
+      echo " === Verifying x264/x265 configuration changes..."
       grep -A 2 -B 2 "check_lib.*x264" configure || echo "x264 patch may not have applied correctly"
       grep -A 2 -B 2 "check_lib.*x265" configure || echo "x265 patch may not have applied correctly"
-      echo "Checking for available x264/x265 libraries..."
       echo "=== Conan lib directory ==="
       ls -la ./conan/lib/ | grep -E "(x264|x265)" || echo "No x264/x265 found in conan/lib"
       echo "=== System libraries ==="
@@ -39,6 +38,13 @@ steps:
       echo "=== pkg-config search for x264/x265 ==="
       pkg-config --exists x264 && echo "x264 found via pkg-config" || echo "x264 NOT found via pkg-config"
       pkg-config --exists x265 && echo "x265 found via pkg-config" || echo "x265 NOT found via pkg-config"
+      echo "=== Header availability ==="
+      find ./conan/include -name "x264.h" -o -name "x265.h" 2>/dev/null || echo "No x264/x265 headers found in conan/include"
+      echo "=== Testing library links manually ==="
+      echo 'int main(){return 0;}' > test.c
+      gcc -I./conan/include -L./conan/lib -lx264 test.c -o test_x264 && echo "Manual x264 link: SUCCESS" || echo "Manual x264 link: FAILED"
+      gcc -I./conan/include -L./conan/lib -lx265 test.c -o test_x265 && echo "Manual x265 link: SUCCESS" || echo "Manual x265 link: FAILED"
+      rm -f test.c test_x264 test_x265
 
       echo ./configure --enable-gpl --enable-shared --disable-ffplay --disable-libxcb --disable-vulkan --disable-sdl2 --disable-xlib --enable-tvai --enable-libvpx --enable-libaom --enable-libzimg --enable-nvenc --enable-libx264 --enable-libx265 --enable-nvdec --extra-cflags="-I./conan/include -I./conan/include/videoai" --extra-ldflags="-Wl,-rpath,./conan/lib/ -L./conan/lib" --prefix=./output-conan/
       set -e
