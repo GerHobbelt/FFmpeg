@@ -16,6 +16,9 @@ class conanRecipe(ConanFile):
             self.options["libvpx"].shared = True
         if self.settings.os == "Macos":
             self.options["openssl"].shared = False
+        
+        if self.settings.os == "Windows" and self.settings.arch == "x86_64":
+            self.options["libaom-av1"].shared = True
 
     def build_requirements(self):
         if self.settings.os == "Macos" and self.settings.arch == "x86_64":

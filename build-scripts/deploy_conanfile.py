@@ -13,6 +13,9 @@ class conanRecipe(ConanFile):
         if self.settings.os == "Macos":
             self.options["openssl"].shared = False
 
+        if self.settings.os == "Windows" and self.settings.arch == "x86_64":
+            self.options["libaom-av1"].shared = True
+
     def requirements(self):
         self.requires("videoai/[~2.0.0]")
         if self.settings.os == "Macos" and self.settings.arch == "x86_64":
