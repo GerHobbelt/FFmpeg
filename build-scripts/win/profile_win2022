@@ -8,6 +8,5 @@ compiler.runtime=dynamic
 compiler.runtime_type=Release
 build_type=Release
 libvpx*:compiler.runtime=static
-libaom-av1*:compiler.runtime=static
 zlib-mt*:compiler.runtime=static
 [options]
