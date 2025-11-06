@@ -47,3 +47,8 @@
 /.*/
 /conan
 !/.forgejo/
+
+
+# topaz
+**/conan-x64
+**/output-conan
