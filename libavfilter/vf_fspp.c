@@ -71,8 +71,8 @@ typedef struct FSPPContext {
 
     FSPPDSPContext dsp;
 
-    DECLARE_ALIGNED(16, uint64_t, threshold_mtx_noq)[8 * 2];
-    DECLARE_ALIGNED(16, uint64_t, threshold_mtx)[8 * 2];
+    DECLARE_ALIGNED(16, int16_t, threshold_mtx_noq)[8 * 8];
+    DECLARE_ALIGNED(16, int16_t, threshold_mtx)[8 * 8];
 } FSPPContext;
 
 
@@ -92,14 +92,16 @@ static const short custom_threshold[64] = {
 // values (296) can't be too high
 // -it causes too big quant dependence
 // or maybe overflow(check), which results in some flashing
-     71, 296, 295, 237,  71,  40,  38,  19,
-    245, 193, 185, 121, 102,  73,  53,  27,
-    158, 129, 141, 107,  97,  73,  50,  26,
-    102, 116, 109,  98,  82,  66,  45,  23,
-     71,  94,  95,  81,  70,  56,  38,  20,
-     56,  77,  74,  66,  56,  44,  30,  15,
-     38,  53,  50,  45,  38,  30,  21,  11,
-     20,  27,  26,  23,  20,  15,  11,   5
+// reorder coefficients to the order in which columns are processed
+#define REORDER(a,b,c,d,e,f,g,h) c, g, a, e, f, d, b, h
+    REORDER( 71, 296, 295, 237,  71,  40,  38,  19),
+    REORDER(245, 193, 185, 121, 102,  73,  53,  27),
+    REORDER(158, 129, 141, 107,  97,  73,  50,  26),
+    REORDER(102, 116, 109,  98,  82,  66,  45,  23),
+    REORDER( 71,  94,  95,  81,  70,  56,  38,  20),
+    REORDER( 56,  77,  74,  66,  56,  44,  30,  15),
+    REORDER( 38,  53,  50,  45,  38,  30,  21,  11),
+    REORDER( 20,  27,  26,  23,  20,  15,  11,   5)
 };
 
 static void filter(FSPPContext *p, uint8_t *dst, uint8_t *src,
@@ -114,9 +116,9 @@ static void filter(FSPPContext *p, uint8_t *dst, uint8_t *src,
     const int qpsh = 4 - p->hsub * !is_luma;
     const int qpsv = 4 - p->vsub * !is_luma;
 
-    DECLARE_ALIGNED(32, int32_t, block_align)[4 * 8 * BLOCKSZ + 4 * 8 * BLOCKSZ];
-    int16_t *block  = (int16_t *)block_align;
-    int16_t *block3 = (int16_t *)(block_align + 4 * 8 * BLOCKSZ);
+    DECLARE_ALIGNED(16, int16_t, block_align)[8 * 8 * BLOCKSZ + 8 * 8 * BLOCKSZ];
+    int16_t *block  = block_align;
+    int16_t *block3 = block_align + 8 * 8 * BLOCKSZ;
 
     memset(block3, 0, 4 * 8 * BLOCKSZ);
 
@@ -154,7 +156,7 @@ static void filter(FSPPContext *p, uint8_t *dst, uint8_t *src,
             p->dsp.row_fdct(block + 8 * 8, p->src + y * stride + 8 + x0 + 2 - (y&1), stride, 2 * (BLOCKSZ - 1));
 
             if (p->qp)
-                p->dsp.column_fidct((int16_t *)(&p->threshold_mtx[0]), block + 0 * 8, block3 + 0 * 8, 8 * (BLOCKSZ - 1)); //yes, this is a HOTSPOT
+                p->dsp.column_fidct(p->threshold_mtx, block + 0 * 8, block3 + 0 * 8, 8 * (BLOCKSZ - 1)); //yes, this is a HOTSPOT
             else
                 for (x = 0; x < 8 * (BLOCKSZ - 1); x += 8) {
                     t = x + x0 - 2;                    //correct t=x+x0-2-(y&1), but its the same
@@ -164,8 +166,11 @@ static void filter(FSPPContext *p, uint8_t *dst, uint8_t *src,
                     t = qp_store[qy + (t >> qpsh)];
                     t = ff_norm_qscale(t, p->qscale_type);
 
-                    if (t != p->prev_q) p->prev_q = t, p->dsp.mul_thrmat((int16_t *)(&p->threshold_mtx_noq[0]), (int16_t *)(&p->threshold_mtx[0]), t);
-                    p->dsp.column_fidct((int16_t *)(&p->threshold_mtx[0]), block + x * 8, block3 + x * 8, 8); //yes, this is a HOTSPOT
+                    if (t != p->prev_q) {
+                        p->prev_q = t;
+                        p->dsp.mul_thrmat(p->threshold_mtx_noq, p->threshold_mtx, t);
+                    }
+                    p->dsp.column_fidct(p->threshold_mtx, block + x * 8, block3 + x * 8, 8); //yes, this is a HOTSPOT
                 }
             p->dsp.row_idct(block3 + 0 * 8, p->temp + (y & 15) * stride + x0 + 2 - (y & 1), stride, 2 * (BLOCKSZ - 1));
             memmove(block,  block  + (BLOCKSZ - 1) * 64, 8 * 8 * sizeof(int16_t)); //cycling
@@ -176,7 +181,7 @@ static void filter(FSPPContext *p, uint8_t *dst, uint8_t *src,
         if (es > 8)
             p->dsp.row_fdct(block + 8 * 8, p->src + y * stride + 8 + x0 + 2 - (y & 1), stride, (es - 4) >> 2);
 
-        p->dsp.column_fidct((int16_t *)(&p->threshold_mtx[0]), block, block3, es&(~1));
+        p->dsp.column_fidct(p->threshold_mtx, block, block3, es&(~1));
         if (es > 3)
             p->dsp.row_idct(block3 + 0 * 8, p->temp + (y & 15) * stride + x0 + 2 - (y & 1), stride, es >> 2);
 
@@ -241,29 +246,16 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     int qp_stride = 0;
     int8_t *qp_table = NULL;
-    int i, bias;
     int ret = 0;
-    int custom_threshold_m[64];
 
-    bias = (1 << 4) + fspp->strength;
+    //FIXME: tune custom_threshold[] and remove this !
+    for (int i = 0, bias = (1 << 4) + fspp->strength; i < 64; ++i)
+        fspp->threshold_mtx_noq[i] = (int)(custom_threshold[i] * (bias / 71.0) + 0.5);
 
-    for (i = 0; i < 64; i++) //FIXME: tune custom_threshold[] and remove this !
-        custom_threshold_m[i] = (int)(custom_threshold[i] * (bias / 71.0) + 0.5);
-
-    for (i = 0; i < 8; i++) {
-        fspp->threshold_mtx_noq[2 * i] = (uint64_t)custom_threshold_m[i * 8 + 2]
-                                      |(((uint64_t)custom_threshold_m[i * 8 + 6]) << 16)
-                                      |(((uint64_t)custom_threshold_m[i * 8 + 0]) << 32)
-                                      |(((uint64_t)custom_threshold_m[i * 8 + 4]) << 48);
-
-        fspp->threshold_mtx_noq[2 * i + 1] = (uint64_t)custom_threshold_m[i * 8 + 5]
-                                          |(((uint64_t)custom_threshold_m[i * 8 + 3]) << 16)
-                                          |(((uint64_t)custom_threshold_m[i * 8 + 1]) << 32)
-                                          |(((uint64_t)custom_threshold_m[i * 8 + 7]) << 48);
+    if (fspp->qp) {
+        fspp->prev_q = fspp->qp;
+        fspp->dsp.mul_thrmat(fspp->threshold_mtx_noq, fspp->threshold_mtx, fspp->qp);
     }
-
-    if (fspp->qp)
-        fspp->prev_q = fspp->qp, fspp->dsp.mul_thrmat((int16_t *)(&fspp->threshold_mtx_noq[0]), (int16_t *)(&fspp->threshold_mtx[0]), fspp->qp);
 
     /* if we are not in a constant user quantizer mode and we don't want to use
      * the quantizers from the B-frames (B-frames often have a higher QP), we
