@@ -1,9 +1,4 @@
 /*
- * VC3/DNxHD SIMD functions
- * Copyright (c) 2007 Baptiste Coudurier <baptiste dot coudurier at smartjog dot com>
- *
- * VC-3 encoder funded by the British Broadcasting Corporation
- *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -21,17 +16,23 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/attributes.h"
-#include "libavutil/x86/cpu.h"
-#include "libavcodec/dnxhdenc.h"
-
-void ff_get_pixels_8x4_sym_sse2(int16_t *restrict block, const uint8_t *pixels,
-                                ptrdiff_t line_size);
-
-av_cold void ff_dnxhdenc_init_x86(DNXHDEncContext *ctx)
+void main(void)
 {
-    if (EXTERNAL_SSE2(av_get_cpu_flags())) {
-        if (ctx->cid_table->bit_depth == 8)
-            ctx->get_pixels_8x4_sym = ff_get_pixels_8x4_sym_sse2;
+    uvec3 gid = gl_GlobalInvocationID;
+#ifndef INTERLACED
+    ivec2 pos = ivec2(gid);
+#else
+    ivec2 pos = ivec2(gid.x, (gid.y << 1) + bottom_field);
+#endif
+
+    /* Clear luma plane */
+    imageStore(dst[0], pos, uvec4(0));
+
+    /* Clear chroma plane */
+    if (gid.x < mb_width << (4 - log2_chroma_w)) {
+        imageStore(dst[1], pos, uvec4(0));
+        imageStore(dst[2], pos, uvec4(0));
     }
+
+    /* Alpha plane doesn't need a clear because it is not sparsely encoded */
 }
