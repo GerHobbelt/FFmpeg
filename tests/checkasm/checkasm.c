@@ -115,6 +115,9 @@ static const struct {
     const char *name;
     void (*func)(void);
 } tests[] = {
+    /* NOTE: When adding a new test to this list here, it also needs to be
+     * added in tests/fate/checkasm.mak, otherwise it doesn't get executed
+     * as part of "make fate" or "make fate-checkasm". */
 #if CONFIG_AVCODEC
     #if CONFIG_AAC_DECODER
         { "aacpsdsp", checkasm_check_aacpsdsp },
@@ -207,7 +210,7 @@ static const struct {
         { "llviddsp", checkasm_check_llviddsp },
     #endif
     #if CONFIG_LLVIDENCDSP
-        { "llviddspenc", checkasm_check_llviddspenc },
+        { "llvidencdsp", checkasm_check_llvidencdsp },
     #endif
     #if CONFIG_LPC
         { "lpc", checkasm_check_lpc },
@@ -347,6 +350,9 @@ static const struct {
         { "av_tx",     checkasm_check_av_tx },
 #endif
     { NULL }
+    /* NOTE: When adding a new test to this list here, it also needs to be
+     * added in tests/fate/checkasm.mak, otherwise it doesn't get executed
+     * as part of "make fate" or "make fate-checkasm". */
 };
 
 /* List of cpu flags to check */
