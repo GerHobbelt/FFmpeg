@@ -25,10 +25,7 @@
 
 SECTION_RODATA
 
-pb_dither: db 0,  48,  12,  60,   3,  51,  15,  63, 32,  16,  44,  28,  35,  19,  47,  31, \
-              8,  56,   4,  52,  11,  59,   7,  55, 40,  24,  36,  20,  43,  27,  39,  23, \
-              2,  50,  14,  62,   1,  49,  13,  61, 34,  18,  46,  30,  33,  17,  45,  29, \
-             10,  58,   6,  54,   9,  57,   5,  53, 42,  26,  38,  22,  41,  25,  37,  21
+cextern fspp_dither
 pw_187E: times 4 dw 0x187E ; FIX64(0.382683433, 14)
 pw_22A3: times 4 dw 0x22A3 ; FIX64(1.082392200, 13)
 pw_2D41: times 4 dw 0x2D41 ; FIX64(1.414213562, 13)
@@ -46,15 +43,15 @@ SECTION .text
 
 %define DCTSIZE 8
 
-INIT_MMX mmx
+INIT_XMM sse2
 
-;void ff_store_slice_mmx(uint8_t *dst, int16_t *src,
-;                        ptrdiff_t dst_stride, ptrdiff_t src_stride,
-;                        ptrdiff_t width, ptrdiff_t height, ptrdiff_t log2_scale)
+;void ff_store_slice_sse2(uint8_t *dst, int16_t *src,
+;                         ptrdiff_t dst_stride, ptrdiff_t src_stride,
+;                         ptrdiff_t width, ptrdiff_t height, ptrdiff_t log2_scale)
 %if ARCH_X86_64
-cglobal store_slice, 7, 9, 0, dst, src, dst_stride, src_stride, width, dither_height, dither, tmp, tmp2
+cglobal store_slice, 7, 9, 5, dst, src, dst_stride, src_stride, width, dither_height, dither, tmp, tmp2
 %else
-cglobal store_slice, 2, 7, 0, dst, src, width, dither_height, dither, tmp, tmp2
+cglobal store_slice, 2, 7, 5, dst, src, width, dither_height, dither, tmp, tmp2
 %define dst_strideq r2m
 %define src_strideq r3m
     mov       widthq, r4m
@@ -65,7 +62,7 @@ cglobal store_slice, 2, 7, 0, dst, src, width, dither_height, dither, tmp, tmp2
     mov       tmpq, src_strideq
     and       widthq, ~7
     sub       dst_strideq, widthq
-    movd      m5, ditherd ; log2_scale
+    movd      m4, ditherd ; log2_scale
     xor       ditherq, -1 ; log2_scale
     mov       tmp2q, tmpq
     add       ditherq, 7 ; log2_scale
@@ -73,33 +70,25 @@ cglobal store_slice, 2, 7, 0, dst, src, width, dither_height, dither, tmp, tmp2
     sub       tmp2q, widthq
     movd      m2, ditherd ; log2_scale
     add       tmp2q, tmp2q
-    lea       ditherq, [pb_dither]
+    lea       ditherq, [fspp_dither]
     mov       src_strideq, tmp2q
     shl       tmpq, 4
     lea       dither_heightq, [ditherq+dither_heightq*8]
-    pxor      m7, m7
+    pxor      m1, m1
 
 .loop_height:
     movq      m3, [ditherq]
-    movq      m4, m3
-    punpcklbw m3, m7
-    punpckhbw m4, m7
+    punpcklbw m3, m1
     mov       tmp2q, widthq
-    psraw     m3, m5
-    psraw     m4, m5
+    psraw     m3, m4
 
 .loop_width:
-    movq      [srcq+tmpq], m7
-    movq      m0, [srcq]
-    movq      m1, [srcq+8]
-    movq      [srcq+tmpq+8], m7
+    mova      m0, [srcq]
+    mova      [srcq+tmpq], m1
     paddw     m0, m3
-    paddw     m1, m4
-    movq      [srcq], m7
+    mova      [srcq], m1
     psraw     m0, m2
-    psraw     m1, m2
-    movq      [srcq+8], m7
-    packuswb  m0, m1
+    packuswb  m0, m0
     add       srcq, 16
     movq      [dstq], m0
     add       dstq, 8
@@ -113,13 +102,13 @@ cglobal store_slice, 2, 7, 0, dst, src, width, dither_height, dither, tmp, tmp2
     jl .loop_height
     RET
 
-;void ff_store_slice2_mmx(uint8_t *dst, int16_t *src,
-;                         ptrdiff_t dst_stride, ptrdiff_t src_stride,
-;                         ptrdiff_t width, ptrdiff_t height, ptrdiff_t log2_scale)
+;void ff_store_slice2_sse2(uint8_t *dst, int16_t *src,
+;                          ptrdiff_t dst_stride, ptrdiff_t src_stride,
+;                          ptrdiff_t width, ptrdiff_t height, ptrdiff_t log2_scale)
 %if ARCH_X86_64
-cglobal store_slice2, 7, 9, 0, dst, src, dst_stride, src_stride, width, dither_height, dither, tmp, tmp2
+cglobal store_slice2, 7, 9, 5, dst, src, dst_stride, src_stride, width, dither_height, dither, tmp, tmp2
 %else
-cglobal store_slice2, 0, 7, 0, dst, src, width, dither_height, dither, tmp, tmp2
+cglobal store_slice2, 0, 7, 5, dst, src, width, dither_height, dither, tmp, tmp2
 %define dst_strideq r2m
 %define src_strideq r3m
     mov       dstq, dstm
@@ -132,41 +121,32 @@ cglobal store_slice2, 0, 7, 0, dst, src, width, dither_height, dither, tmp, tmp2
     mov       tmpq, src_strideq
     and       widthq, ~7
     sub       dst_strideq, widthq
-    movd      m5, ditherd ; log2_scale
+    movd      m4, ditherd ; log2_scale
     xor       ditherq, -1 ; log2_scale
     mov       tmp2q, tmpq
     add       ditherq, 7 ; log2_scale
     sub       tmp2q, widthq
     movd      m2, ditherd ; log2_scale
     add       tmp2q, tmp2q
-    lea       ditherq, [pb_dither]
+    lea       ditherq, [fspp_dither]
     mov       src_strideq, tmp2q
     shl       tmpq, 5
     lea       dither_heightq, [ditherq+dither_heightq*8]
-    pxor      m7, m7
+    pxor      m1, m1
 
 .loop_height:
     movq      m3, [ditherq]
-    movq      m4, m3
-    punpcklbw m3, m7
-    punpckhbw m4, m7
+    punpcklbw m3, m1
     mov       tmp2q,widthq
-    psraw     m3, m5
-    psraw     m4, m5
+    psraw     m3, m4
 
 .loop_width:
-    movq      m0, [srcq]
-    movq      m1, [srcq+8]
+    mova      m0, [srcq]
     paddw     m0, m3
     paddw     m0, [srcq+tmpq]
-    paddw     m1, m4
-    movq      m6, [srcq+tmpq+8]
-    movq      [srcq+tmpq], m7
+    mova      [srcq+tmpq], m1
     psraw     m0, m2
-    paddw     m1, m6
-    movq      [srcq+tmpq+8], m7
-    psraw     m1, m2
-    packuswb  m0, m1
+    packuswb  m0, m0
     movq      [dstq], m0
     add       srcq, 16
     add       dstq, 8
@@ -180,59 +160,35 @@ cglobal store_slice2, 0, 7, 0, dst, src, width, dither_height, dither, tmp, tmp2
     jl .loop_height
     RET
 
-;void ff_mul_thrmat_mmx(int16_t *thr_adr_noq, int16_t *thr_adr, int q);
-cglobal mul_thrmat, 3, 3, 0, thrn, thr, q
-    movd      m7, qd
-    movq      m0, [thrnq]
-    punpcklwd m7, m7
-    movq      m1, [thrnq+8]
-    punpckldq m7, m7
-    pmullw    m0, m7
-    movq      m2, [thrnq+8*2]
-    pmullw    m1, m7
-    movq      m3, [thrnq+8*3]
-    pmullw    m2, m7
-    movq      [thrq], m0
-    movq      m4, [thrnq+8*4]
-    pmullw    m3, m7
-    movq      [thrq+8], m1
-    movq      m5, [thrnq+8*5]
-    pmullw    m4, m7
-    movq      [thrq+8*2], m2
-    movq      m6, [thrnq+8*6]
-    pmullw    m5, m7
-    movq      [thrq+8*3], m3
-    movq      m0, [thrnq+8*7]
-    pmullw    m6, m7
-    movq      [thrq+8*4], m4
-    movq      m1, [thrnq+8*7+8]
-    pmullw    m0, m7
-    movq      [thrq+8*5], m5
-    movq      m2, [thrnq+8*7+8*2]
-    pmullw    m1, m7
-    movq      [thrq+8*6], m6
-    movq      m3, [thrnq+8*7+8*3]
-    pmullw    m2, m7
-    movq      [thrq+8*7], m0
-    movq      m4, [thrnq+8*7+8*4]
-    pmullw    m3, m7
-    movq      [thrq+8*7+8], m1
-    movq      m5, [thrnq+8*7+8*5]
-    pmullw    m4, m7
-    movq      [thrq+8*7+8*2], m2
-    movq      m6, [thrnq+8*7+8*6]
-    pmullw    m5, m7
-    movq      [thrq+8*7+8*3], m3
-    movq      m0, [thrnq+14*8]
-    pmullw    m6, m7
-    movq      [thrq+8*7+8*4], m4
-    movq      m1, [thrnq+14*8+8]
-    pmullw    m0, m7
-    movq      [thrq+8*7+8*5], m5
-    pmullw    m1, m7
-    movq      [thrq+8*7+8*6], m6
-    movq      [thrq+14*8], m0
-    movq      [thrq+14*8+8], m1
+;void ff_mul_thrmat_sse2(int16_t *thr_adr_noq, int16_t *thr_adr, int q);
+cglobal mul_thrmat, 3, 3, 5, thrn, thr, q
+    movd      m4, qd
+    mova      m0, [thrnq]
+    punpcklwd m4, m4
+    mova      m1, [thrnq+16]
+    pshufd    m4, m4, 0
+    pmullw    m0, m4
+    mova      m2, [thrnq+16*2]
+    pmullw    m1, m4
+    mova      m3, [thrnq+16*3]
+    pmullw    m2, m4
+    mova      [thrq], m0
+    mova      m0, [thrnq+16*4]
+    pmullw    m3, m4
+    mova      [thrq+16], m1
+    mova      m1, [thrnq+16*5]
+    pmullw    m0, m4
+    mova      [thrq+16*2], m2
+    mova      m2, [thrnq+16*6]
+    pmullw    m1, m4
+    mova      [thrq+16*3], m3
+    mova      m3, [thrnq+16*7]
+    pmullw    m2, m4
+    mova      [thrq+16*4], m0
+    pmullw    m3, m4
+    mova      [thrq+16*5], m1
+    mova      [thrq+16*6], m2
+    mova      [thrq+16*7], m3
     RET
 
 %macro COLUMN_FDCT 1-3 0, 0
@@ -460,6 +416,7 @@ cglobal mul_thrmat, 3, 3, 0, thrn, thr, q
     add       outq, 8+%1
 %endmacro
 
+INIT_MMX mmx
 ;void ff_column_fidct_mmx(int16_t *thr_adr, int16_t *data, int16_t *output, int cnt);
 cglobal column_fidct, 4, 5, 0, 32, thr, src, out, cnt, tmp
 .fdct1:
