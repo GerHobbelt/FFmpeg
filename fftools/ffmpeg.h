@@ -136,6 +136,7 @@ typedef struct StreamMap {
     int disabled;           /* 1 is this mapping is disabled by a negative map */
     int file_index;
     int stream_index;
+    int group_index;
     char *linklabel;       /* name of an output link, for mapping lavfi outputs */
 
     ViewSpecifier vs;
@@ -402,6 +403,11 @@ typedef struct FilterGraph {
     OutputFilter **outputs;
     int         nb_outputs;
 
+    // true when the filtergraph is created internally for
+    // purposes like stream group merging. Meant to be freed
+    // if unbound.
+    int                 is_internal;
+
     const char      *graph_desc;
     struct AVBPrint graph_print_buf;
 } FilterGraph;
@@ -491,6 +497,18 @@ typedef struct InputStream {
     int                nb_filters;
 } InputStream;
 
+typedef struct InputStreamGroup {
+    const AVClass        *class;
+
+    /* parent source */
+    struct InputFile     *file;
+
+    int                   index;
+
+    FilterGraph          *fg;
+    AVStreamGroup        *stg;
+} InputStreamGroup;
+
 typedef struct InputFile {
     const AVClass   *class;
 
@@ -512,6 +530,10 @@ typedef struct InputFile {
      * if new streams appear dynamically during demuxing */
     InputStream    **streams;
     int           nb_streams;
+
+    /* stream groups that ffmpeg is aware of; */
+    InputStreamGroup **stream_groups;
+    int           nb_stream_groups;
 } InputFile;
 
 enum forced_keyframes_const {
@@ -698,6 +720,9 @@ typedef struct FrameData {
     int64_t wallclock[LATENCY_PROBE_NB];
 
     AVCodecParameters *par_enc;
+
+    AVFrameSideData   **side_data;
+    int                 nb_side_data;
 } FrameData;
 
 extern InputFile   **input_files;
@@ -928,6 +953,15 @@ void opt_match_per_stream_int64(void *logctx, const SpecifierOptList *sol,
                                 AVFormatContext *fc, AVStream *st, int64_t *out);
 void opt_match_per_stream_dbl(void *logctx, const SpecifierOptList *sol,
                               AVFormatContext *fc, AVStream *st, double *out);
+
+void opt_match_per_stream_group_str(void *logctx, const SpecifierOptList *sol,
+                                    AVFormatContext *fc, AVStreamGroup *stg, const char **out);
+void opt_match_per_stream_group_int(void *logctx, const SpecifierOptList *sol,
+                                    AVFormatContext *fc, AVStreamGroup *stg, int *out);
+void opt_match_per_stream_group_int64(void *logctx, const SpecifierOptList *sol,
+                                      AVFormatContext *fc, AVStreamGroup *stg, int64_t *out);
+void opt_match_per_stream_group_dbl(void *logctx, const SpecifierOptList *sol,
+                                    AVFormatContext *fc, AVStreamGroup *stg, double *out);
 
 int view_specifier_parse(const char **pspec, ViewSpecifier *vs);
 
