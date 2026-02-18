@@ -1,4 +1,8 @@
 /*
+ * Android Binder handler
+ *
+ * Copyright (c) 2025 Dmitrii Okunev
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,17 +20,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/file.c"
+#ifndef COMPAT_ANDROID_BINDER_H
+#define COMPAT_ANDROID_BINDER_H
 
-int main(void)
-{
-    uint8_t *buf;
-    size_t size;
-    if (av_file_map("file.c", &buf, &size, 0, NULL) < 0)
-        return 1;
+/**
+ * Initialize Android Binder thread pool.
+ */
+void android_binder_threadpool_init_if_required(void);
 
-    buf[0] = 's';
-    printf("%s", buf);
-    av_file_unmap(buf, size);
-    return 0;
-}
+#endif                          // COMPAT_ANDROID_BINDER_H
