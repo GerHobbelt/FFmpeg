@@ -1097,6 +1097,7 @@ static SwsLinearOp fmt_encode_range(const SwsFormat *fmt, bool *incomplete)
     if (fmt->desc->flags & AV_PIX_FMT_FLAG_FLOAT)
         return c; /* floats are directly output as-is */
 
+    av_assert0(depth0 < 32 && depth1 < 32 && depth2 < 32 && depth3 < 32);
     if (fmt->csp == AVCOL_SPC_RGB || (fmt->desc->flags & AV_PIX_FMT_FLAG_XYZ)) {
         c.m[0][0] = Q((1 << depth0) - 1);
         c.m[1][1] = Q((1 << depth1) - 1);
@@ -1319,10 +1320,13 @@ int ff_sws_decode_colors(SwsContext *ctx, SwsPixelType type,
                          SwsOpList *ops, const SwsFormat *fmt, bool *incomplete)
 {
     const AVLumaCoefficients *c = av_csp_luma_coeffs_from_avcsp(fmt->csp);
+    const SwsPixelType pixel_type = fmt_pixel_type(fmt->format);
+    if (!pixel_type)
+         return AVERROR(ENOTSUP);
 
     RET(ff_sws_op_list_append(ops, &(SwsOp) {
         .op         = SWS_OP_CONVERT,
-        .type       = fmt_pixel_type(fmt->format),
+        .type       = pixel_type,
         .convert.to = type,
     }));
 
@@ -1402,6 +1406,9 @@ int ff_sws_encode_colors(SwsContext *ctx, SwsPixelType type,
                          const SwsFormat *dst, bool *incomplete)
 {
     const AVLumaCoefficients *c = av_csp_luma_coeffs_from_avcsp(dst->csp);
+    const SwsPixelType pixel_type = fmt_pixel_type(dst->format);
+    if (!pixel_type)
+         return AVERROR(ENOTSUP);
 
     switch (dst->csp) {
     case AVCOL_SPC_RGB:
@@ -1496,7 +1503,7 @@ int ff_sws_encode_colors(SwsContext *ctx, SwsPixelType type,
     return ff_sws_op_list_append(ops, &(SwsOp) {
         .type       = type,
         .op         = SWS_OP_CONVERT,
-        .convert.to = fmt_pixel_type(dst->format),
+        .convert.to = pixel_type,
     });
 }
 
