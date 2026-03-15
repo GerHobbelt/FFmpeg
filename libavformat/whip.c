@@ -21,6 +21,8 @@
 
 #include "libavcodec/h264.h"
 #include "libavcodec/startcode.h"
+
+#include "libavutil/attributes_internal.h"
 #include "libavutil/avassert.h"
 #include "libavutil/base64.h"
 #include "libavutil/bprint.h"
@@ -1540,12 +1542,6 @@ static int create_rtp_muxer(AVFormatContext *s)
     WHIPContext *whip = s->priv_data;
     whip->udp->flags |= AVIO_FLAG_NONBLOCK;
 
-    const AVOutputFormat *rtp_format = av_guess_format("rtp", NULL, NULL);
-    if (!rtp_format) {
-        av_log(whip, AV_LOG_ERROR, "Failed to guess rtp muxer\n");
-        ret = AVERROR(ENOSYS);
-        goto end;
-    }
 
     /* The UDP buffer size, may greater than MTU. */
     buffer_size = MAX_UDP_BUFFER_SIZE;
@@ -1559,7 +1555,8 @@ static int create_rtp_muxer(AVFormatContext *s)
             goto end;
         }
 
-        rtp_ctx->oformat = rtp_format;
+        EXTERN const FFOutputFormat ff_rtp_muxer;
+        rtp_ctx->oformat = &ff_rtp_muxer.p;
         if (!avformat_new_stream(rtp_ctx, NULL)) {
             ret = AVERROR(ENOMEM);
             goto end;
@@ -1999,7 +1996,7 @@ static av_cold void whip_deinit(AVFormatContext *s)
     ff_srtp_free(&whip->srtp_video_rtx_send);
     ff_srtp_free(&whip->srtp_rtcp_send);
     ff_srtp_free(&whip->srtp_recv);
-    ffurl_close(whip->dtls_uc);
+    ffurl_closep(&whip->dtls_uc);
     ffurl_closep(&whip->udp);
     av_freep(&whip->dtls_fingerprint);
 }
