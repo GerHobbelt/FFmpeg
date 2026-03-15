@@ -39,7 +39,6 @@
 #include "huffyuvencdsp.h"
 #include "lossless_videoencdsp.h"
 #include "put_bits.h"
-#include "libavutil/emms.h"
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -278,7 +277,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
     s->mask  = (1 << s->bps) - 1;
     s->vlc_n = FFMIN(1 << s->bps, MAX_VLC_N);
 
-    ff_huffyuvencdsp_init(&s->hencdsp, s->bps);
+    ff_huffyuvencdsp_init(&s->hencdsp, s->bps, avctx->width >> s->chroma_h_shift);
 
     switch (avctx->pix_fmt) {
     case AV_PIX_FMT_YUV420P:
@@ -940,7 +939,6 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     } else {
         av_log(avctx, AV_LOG_ERROR, "Format not supported!\n");
     }
-    emms_c();
 
     size += (put_bits_count(&s->pb) + 31) / 8;
     put_bits(&s->pb, 16, 0);
