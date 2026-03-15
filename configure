@@ -4037,8 +4037,8 @@ srtp_protocol_select="rtp_protocol srtp"
 tcp_protocol_select="network"
 tls_protocol_deps_any="gnutls openssl schannel securetransport libtls mbedtls"
 tls_protocol_select="tcp_protocol"
-# TODO: Support libtls, mbedtls.
-dtls_protocol_deps_any="openssl schannel gnutls"
+# TODO: Support libtls.
+dtls_protocol_deps_any="openssl schannel gnutls mbedtls"
 dtls_protocol_select="udp_protocol"
 udp_protocol_select="network"
 udplite_protocol_select="network"
@@ -4289,7 +4289,7 @@ avutil_suggest="clock_gettime ffnvcodec gcrypt libm zlib libdrm libmfx opencl op
 swresample_deps="avutil"
 swresample_suggest="libm libsoxr stdatomic"
 swscale_deps="avutil"
-swscale_suggest="libm stdatomic"
+swscale_suggest="libm stdatomic spirv_library"
 shader_compression_suggest="zlib"
 
 avcodec_extralibs="pthreads_extralibs iconv_extralibs dxva2_extralibs liblcevc_dec_extralibs lcms2_extralibs"
@@ -8172,16 +8172,19 @@ enabled threads || warn \
     "environment."
 
 case $target_os in
-haiku)
-    disable memalign
-    disable posix_memalign
-    ;;
 *-dos|freedos|opendos)
     if test_cpp_condition sys/version.h "defined(__DJGPP__) && __DJGPP__ == 2 && __DJGPP_MINOR__ == 5"; then
         disable memalign
     fi
     ;;
 esac
+
+if ! enabled_any memalign posix_memalign aligned_malloc; then
+    if enabled_any asm inline_asm; then
+        die "ERROR: Building with assembly enabled is not supported on platforms "\
+            "without aligned memory allocations! Try reconfiguring with --disable-asm"
+    fi
+fi
 
 flatten_extralibs(){
     nested_entries=
