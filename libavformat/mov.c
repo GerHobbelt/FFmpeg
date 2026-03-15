@@ -3699,6 +3699,9 @@ static int mov_read_sdtp(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     av_freep(&sc->sdtp_data);
     sc->sdtp_count = 0;
 
+    if (entries < 0 || entries > SIZE_MAX)
+        return AVERROR(ERANGE);
+
     sc->sdtp_data = av_malloc(entries);
     if (!sc->sdtp_data)
         return AVERROR(ENOMEM);
@@ -4759,7 +4762,8 @@ static void mov_build_index(MOVContext *mov, AVStream *st)
 
         if (!multiple_edits && !mov->advanced_editlist &&
             st->codecpar->codec_id == AV_CODEC_ID_AAC && start_time > 0)
-            sc->start_pad = start_time;
+            sc->start_pad = av_rescale_q(start_time, st->time_base,
+                    (AVRational){1, st->codecpar->sample_rate});
     }
 
     /* only use old uncompressed audio chunk demuxing when stts specifies it */
