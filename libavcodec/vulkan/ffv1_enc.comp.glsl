@@ -32,7 +32,7 @@ layout (set = 0, binding = 2, scalar) uniform crc_ieee_buf {
 };
 
 layout (set = 1, binding = 1, scalar) writeonly buffer slice_results_buf {
-    uint64_t slice_results[];
+    uint32_t slice_results[];
 };
 layout (set = 1, binding = 3) uniform uimage2D src[];
 
@@ -42,30 +42,33 @@ layout (set = 1, binding = 2, scalar) buffer slice_state_buf {
     uint8_t slice_rc_state[];
 };
 
-#define WRITE(c, off, val) put_rac_direct(c, slice_rc_state[state_off + off], val)
-void put_symbol(inout RangeCoder c, uint state_off, int v)
+#define WRITE(idx, val) put_rac(rc_state[idx], val)
+void put_symbol(int v)
 {
     bool is_nil = (v == 0);
-    WRITE(c, 0, is_nil);
+    WRITE(0, is_nil);
     if (is_nil)
         return;
 
-    const int a = abs(v);
-    const int e = findMSB(a);
+    int a = abs(v);
+    int e = findMSB(a);
 
     for (int i = 0; i < e; i++)
-        WRITE(c, 1 + min(i, 9), true);
-    WRITE(c, 1 + min(e, 9), false);
+        WRITE(1 + min(i, 9), true);
+    WRITE(1 + min(e, 9), false);
 
     for (int i = e - 1; i >= 0; i--)
-        WRITE(c, 22 + min(i, 9), bool(bitfieldExtract(a, i, 1)));
+        WRITE(22 + min(i, 9), bool(bitfieldExtract(a, i, 1)));
 
-    WRITE(c, 22 - 11 + min(e, 10), v < 0);
+    WRITE(22 - 11 + min(e, 10), v < 0);
 }
 
-void encode_line_pcm(inout SliceContext sc, readonly uimage2D img,
-                     ivec2 sp, int y, int p, int comp)
+void encode_line_pcm(in SliceContext sc, readonly uimage2D img,
+                     ivec2 sp, int y, uint p, uint comp)
 {
+    if (gl_LocalInvocationID.x > 0)
+        return;
+
     int w = sc.slice_dim.x;
 
 #ifndef RGB
@@ -78,15 +81,14 @@ void encode_line_pcm(inout SliceContext sc, readonly uimage2D img,
     for (int x = 0; x < w; x++) {
         uint v = imageLoad(img, sp + LADDR(ivec2(x, y)))[comp];
 
-        [[unroll]]
         for (uint i = (rct_offset >> 1); i > 0; i >>= 1)
-            put_rac_equi(sc.c, bool(v & i));
+            put_rac_equi(bool(v & i));
     }
 }
 
-void encode_line(inout SliceContext sc, readonly uimage2D img, uint state_off,
-                 ivec2 sp, int y, int p, int comp,
-                 uint8_t quant_table_idx, const int run_index)
+void encode_line(in SliceContext sc, readonly uimage2D img, uint state_off,
+                 ivec2 sp, int y, uint p, uint comp,
+                 uint8_t quant_table_idx, in int run_index)
 {
     int w = sc.slice_dim.x;
 
@@ -97,19 +99,31 @@ void encode_line(inout SliceContext sc, readonly uimage2D img, uint state_off,
     }
 #endif
 
+    linecache_load(img, sp, y, comp);
+
     for (int x = 0; x < w; x++) {
         ivec2 d = get_pred(img, sp, ivec2(x, y), comp, w,
                            quant_table_idx, extend_lookup[quant_table_idx]);
-        d[1] = int(imageLoad(img, sp + LADDR(ivec2(x, y)))[comp]) - d[1];
+        TYPE cur = TYPE(imageLoad(img, sp + LADDR(ivec2(x, y)))[comp]);
+        d[1] = int(cur) - d[1];
 
         if (d[0] < 0)
             d = -d;
 
         d[1] = fold(d[1], bits);
 
-        uint context_off = state_off + CONTEXT_SIZE*d[0];
+        uint rc_off = state_off + CONTEXT_SIZE*d[0] + gl_LocalInvocationID.x;
 
-        put_symbol(sc.c, context_off, d[1]);
+        rc_state[gl_LocalInvocationID.x] = slice_rc_state[rc_off];
+        barrier();
+
+        if (gl_LocalInvocationID.x == 0) {
+            put_symbol(d[1]);
+            linecache_next(cur);
+        }
+
+        barrier();
+        slice_rc_state[rc_off] = rc_state[gl_LocalInvocationID.x];
     }
 }
 
@@ -122,16 +136,15 @@ layout (set = 1, binding = 2, scalar) buffer slice_state_buf {
 uint hdr_len = 0;
 PutBitContext pb;
 
-void init_golomb(inout SliceContext sc)
+void init_golomb(void)
 {
-    hdr_len = rac_terminate(sc.c);
-    init_put_bits(pb,
-                  OFFBUF(u8buf, sc.c.bytestream_start, hdr_len),
+    hdr_len = rac_terminate();
+    init_put_bits(pb, OFFBUF(u8buf, rc.bs_start, hdr_len),
                   slice_size_max - hdr_len);
 }
 
-void encode_line(inout SliceContext sc, readonly uimage2D img, uint state_off,
-                 ivec2 sp, int y, int p, int comp,
+void encode_line(in SliceContext sc, readonly uimage2D img, uint state_off,
+                 ivec2 sp, int y, uint p, uint comp,
                  uint8_t quant_table_idx, inout int run_index)
 {
     int w = sc.slice_dim.x;
@@ -143,13 +156,17 @@ void encode_line(inout SliceContext sc, readonly uimage2D img, uint state_off,
     }
 #endif
 
+    linecache_load(img, sp, y, comp);
+
     int run_count = 0;
     bool run_mode = false;
 
     for (int x = 0; x < w; x++) {
         ivec2 d = get_pred(img, sp, ivec2(x, y), comp, w,
                            quant_table_idx, extend_lookup[quant_table_idx]);
-        d[1] = int(imageLoad(img, sp + LADDR(ivec2(x, y)))[comp]) - d[1];
+        TYPE cur = TYPE(imageLoad(img, sp + LADDR(ivec2(x, y)))[comp]);
+        d[1] = int(cur) - d[1];
+        linecache_next(cur);
 
         if (d[0] < 0)
             d = -d;
@@ -201,6 +218,8 @@ void encode_line(inout SliceContext sc, readonly uimage2D img, uint state_off,
 #endif
 
 #ifdef RGB
+const uvec4 rgb_plane_order = { 1, 2, 0, 3 };
+
 ivec4 load_components(ivec2 pos)
 {
     ivec4 pix = ivec4(imageLoad(src[0], pos));
@@ -217,7 +236,7 @@ void transform_sample(inout ivec4 pix, ivec2 rct_coef)
 {
     pix.b -= pix.g;
     pix.r -= pix.g;
-    pix.g += (pix.r*rct_coef.x + pix.b*rct_coef.y) >> 2;
+    pix.g += (pix.b*rct_coef.g + pix.r*rct_coef.r) >> 2;
     pix.b += rct_offset;
     pix.r += rct_offset;
 }
@@ -230,15 +249,18 @@ void preload_rgb(in SliceContext sc, ivec2 sp, int w, int y, bool apply_rct)
 
         ivec4 pix = load_components(pos);
 
-        if (expectEXT(apply_rct, true))
+        if (apply_rct)
             transform_sample(pix, sc.slice_rct_coef);
 
         imageStore(tmp, lpos, pix);
     }
+
+    memoryBarrierImage();
+    barrier();
 }
 #endif
 
-void encode_slice(inout SliceContext sc, const uint slice_idx)
+void encode_slice(in SliceContext sc, uint slice_idx)
 {
     ivec2 sp = sc.slice_pos;
 
@@ -247,7 +269,7 @@ void encode_slice(inout SliceContext sc, const uint slice_idx)
 #endif
 
 #ifndef GOLOMB
-    if (sc.slice_coding_mode == 1) {
+    if (force_pcm) {
 #ifndef RGB
         for (int c = 0; c < color_planes; c++) {
 
@@ -266,68 +288,59 @@ void encode_slice(inout SliceContext sc, const uint slice_idx)
         for (int y = 0; y < sc.slice_dim.y; y++) {
             preload_rgb(sc, sp, sc.slice_dim.x, y, false);
 
-            encode_line_pcm(sc, tmp, sp, y, 0, 1);
-            encode_line_pcm(sc, tmp, sp, y, 0, 2);
-            encode_line_pcm(sc, tmp, sp, y, 0, 0);
-            if (transparency)
-                encode_line_pcm(sc, tmp, sp, y, 0, 3);
+            for (uint c = 0; c < color_planes; c++)
+                encode_line_pcm(sc, tmp, sp, y, 0, rgb_plane_order[c]);
         }
 #endif
         return;
     }
 #endif
 
-    u8vec4 quant_table_idx = sc.quant_table_idx.xyyz;
     u32vec4 slice_state_off = (slice_idx*codec_planes +
                                uvec4(0, 1, 1, 2))*plane_state_size;
 
 #ifdef GOLOMB
     slice_state_off >>= 3;
-    init_golomb(slice_ctx[slice_idx]);
+    init_golomb();
 #endif
 
 #ifndef RGB
-    for (int c = 0; c < color_planes; c++) {
+    for (uint c = 0; c < color_planes; c++) {
         int run_index = 0;
 
         int h = sc.slice_dim.y;
         if (c > 0 && c < 3)
             h = ceil_rshift(h, chroma_shift.y);
 
-        int p = min(c, planes - 1);
-        int comp = c - p;
+        uint p = min(c, planes - 1);
+        uint comp = c - p;
 
         for (int y = 0; y < h; y++)
             encode_line(sc, src[p], slice_state_off[c], sp, y, p,
-                        comp, quant_table_idx[c], run_index);
+                        comp, U8(context_model), run_index);
     }
 #else
     int run_index = 0;
     for (int y = 0; y < sc.slice_dim.y; y++) {
         preload_rgb(sc, sp, sc.slice_dim.x, y, true);
 
-        encode_line(sc, tmp, slice_state_off[0],
-                    sp, y, 0, 1, quant_table_idx[0], run_index);
-        encode_line(sc, tmp, slice_state_off[1],
-                    sp, y, 0, 2, quant_table_idx[1], run_index);
-        encode_line(sc, tmp, slice_state_off[2],
-                    sp, y, 0, 0, quant_table_idx[2], run_index);
-        if (transparency)
-            encode_line(sc, tmp, slice_state_off[3],
-                        sp, y, 0, 3, quant_table_idx[3], run_index);
+        for (uint c = 0; c < color_planes; c++)
+            encode_line(sc, tmp, slice_state_off[c],
+                        sp, y, 0, rgb_plane_order[c],
+                        U8(context_model), run_index);
     }
 #endif
 }
 
-void finalize_slice(inout SliceContext sc, const uint slice_idx)
+void finalize_slice(in uint slice_idx)
 {
 #ifdef GOLOMB
     uint32_t enc_len = hdr_len + flush_put_bits(pb);
 #else
-    uint32_t enc_len = rac_terminate(sc.c);
+    uint32_t enc_len = rac_terminate();
 #endif
 
-    u8buf bs = u8buf(sc.c.bytestream_start);
+    u8buf bs = u8buf(slice_data + rc.bs_start);
 
     /* Append slice length */
     u8vec4 enc_len_p = unpack8(enc_len);
@@ -356,13 +369,19 @@ void finalize_slice(inout SliceContext sc, const uint slice_idx)
         enc_len += 4;
     }
 
-    slice_results[slice_idx*2 + 0] = enc_len;
-    slice_results[slice_idx*2 + 1] = uint64_t(bs) - uint64_t(slice_data);
+    slice_results[slice_idx] = enc_len;
 }
 
 void main(void)
 {
-    const uint slice_idx = gl_WorkGroupID.y*gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    uint slice_idx = gl_WorkGroupID.y*gl_NumWorkGroups.x + gl_WorkGroupID.x;
+
+    if (gl_LocalInvocationID.x == 0)
+        rc = slice_ctx[slice_idx].c;
+    barrier();
+
     encode_slice(slice_ctx[slice_idx], slice_idx);
-    finalize_slice(slice_ctx[slice_idx], slice_idx);
+
+    if (gl_LocalInvocationID.x == 0)
+        finalize_slice(slice_idx);
 }

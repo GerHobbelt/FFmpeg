@@ -23,7 +23,6 @@
 #ifndef VULKAN_FFV1_COMMON_H
 #define VULKAN_FFV1_COMMON_H
 
-#include "rangecoder.glsl"
 #ifdef GOLOMB
 #include "ffv1_vlc.glsl"
 #endif
@@ -77,9 +76,17 @@ layout (push_constant, scalar) uniform pushConstants {
     uint slice_size_max;
 };
 
+#include "rangecoder.glsl"
+
+#if !defined(RGB)
+#define TYPE int16_t
+#define VTYPE2 i16vec2
+#define VTYPE3 i16vec3
+#else
 #define TYPE int32_t
 #define VTYPE2 i32vec2
 #define VTYPE3 i32vec3
+#endif
 
 struct SliceContext {
     RangeCoder c;
@@ -93,7 +100,15 @@ struct SliceContext {
     bool slice_reset_contexts;
 };
 
-layout (set = 1, binding = 0) buffer slice_ctx_buf {
+#if !defined(SB_QUALI)
+#if (defined(ENCODE) || defined(DECODE))
+#define SB_QUALI readonly
+#else
+#define SB_QUALI
+#endif
+#endif
+
+layout (set = 1, binding = 0, scalar) SB_QUALI buffer slice_ctx_buf {
     SliceContext slice_ctx[];
 };
 
@@ -126,29 +141,6 @@ int predict(int L, ivec2 top)
     return mid_pred(L, L + top[1] - top[0], top[1]);
 }
 
-/* { -2, -1 }, { -1, 0, 1 }, 0 */
-int get_context(VTYPE2 cur_l, VTYPE3 top_l, TYPE top2, uint8_t quant_table_idx)
-{
-    const int LT = top_l[0]; /* -1 */
-    const int T  = top_l[1]; /*  0 */
-    const int RT = top_l[2]; /*  1 */
-    const int L  = cur_l[1]; /* -1 */
-
-    int base = quant_table[quant_table_idx][0][(L - LT) & MAX_QUANT_TABLE_MASK] +
-               quant_table[quant_table_idx][1][(LT - T) & MAX_QUANT_TABLE_MASK] +
-               quant_table[quant_table_idx][2][(T - RT) & MAX_QUANT_TABLE_MASK];
-
-    if ((quant_table[quant_table_idx][3][127] == 0) &&
-        (quant_table[quant_table_idx][4][127] == 0))
-        return base;
-
-    const int TT = top2;     /* -2 */
-    const int LL = cur_l[0]; /* -2 */
-    return base +
-           quant_table[quant_table_idx][3][(LL - L) & MAX_QUANT_TABLE_MASK] +
-           quant_table[quant_table_idx][4][(TT - T) & MAX_QUANT_TABLE_MASK];
-}
-
 const uint32_t log2_run[41] = {
      0,  0,  0,  0,  1,  1,  1,  1,
      2,  2,  2,  2,  3,  3,  3,  3,
@@ -158,14 +150,16 @@ const uint32_t log2_run[41] = {
     24,
 };
 
+shared VTYPE2 linecache = {};
+
 #ifdef RGB
 #define RGB_LBUF (rgb_linecache - 1)
 #define LADDR(p) (ivec2((p).x, ((p).y & RGB_LBUF)))
 
 ivec2 get_pred(readonly uimage2D pred, ivec2 sp, ivec2 off,
-               int comp, int sw, uint8_t quant_table_idx, bool extend_lookup)
+               uint comp, int sw, uint8_t quant_table_idx, bool extend_lookup)
 {
-    const ivec2 yoff_border1 = expectEXT(off.x == 0, false) ? off + ivec2(1, -1) : off;
+    ivec2 yoff_border1 = expectEXT(off.x == 0, false) ? off + ivec2(1, -1) : off;
 
     /* Thanks to the same coincidence as below, we can skip checking if off == 0, 1 */
     VTYPE3 top  = VTYPE3(TYPE(imageLoad(pred, sp + LADDR(yoff_border1 + ivec2(-1, -1)))[comp]),
@@ -175,18 +169,14 @@ ivec2 get_pred(readonly uimage2D pred, ivec2 sp, ivec2 off,
     /* Normally, we'd need to check if off != ivec2(0, 0) here, since otherwise, we must
      * return zero. However, ivec2(-1,  0) + ivec2(1, -1) == ivec2(0, -1), e.g. previous
      * row, 0 offset, same slice, which is zero since we zero out the buffer for RGB */
-    TYPE cur = TYPE(imageLoad(pred, sp + LADDR(yoff_border1 + ivec2(-1,  0)))[comp]);
+    TYPE cur = linecache[1];
 
     int base = quant_table[quant_table_idx][0][(cur    - top[0]) & MAX_QUANT_TABLE_MASK] +
                quant_table[quant_table_idx][1][(top[0] - top[1]) & MAX_QUANT_TABLE_MASK] +
                quant_table[quant_table_idx][2][(top[1] - top[2]) & MAX_QUANT_TABLE_MASK];
 
     if (has_extend_lookup && extend_lookup) {
-        TYPE cur2 = TYPE(0);
-        if (expectEXT(off.x > 0, true)) {
-            const ivec2 yoff_border2 = expectEXT(off.x == 1, false) ? ivec2(-1, -1) : ivec2(-2, 0);
-            cur2 = TYPE(imageLoad(pred, sp + LADDR(off + yoff_border2))[comp]);
-        }
+        TYPE cur2 = linecache[0];
         base += quant_table[quant_table_idx][3][(cur2 - cur) & MAX_QUANT_TABLE_MASK];
 
         /* top-2 became current upon swap when rgb_linecache == 2 */
@@ -207,9 +197,9 @@ ivec2 get_pred(readonly uimage2D pred, ivec2 sp, ivec2 off,
 #define LADDR(p) (p)
 
 ivec2 get_pred(readonly uimage2D pred, ivec2 sp, ivec2 off,
-               int comp, int sw, uint8_t quant_table_idx, bool extend_lookup)
+               uint comp, int sw, uint8_t quant_table_idx, bool extend_lookup)
 {
-    const ivec2 yoff_border1 = off.x == 0 ? ivec2(1, -1) : ivec2(0, 0);
+    ivec2 yoff_border1 = off.x == 0 ? ivec2(1, -1) : ivec2(0, 0);
     sp += off;
 
     VTYPE3 top  = VTYPE3(TYPE(0),
@@ -222,20 +212,14 @@ ivec2 get_pred(readonly uimage2D pred, ivec2 sp, ivec2 off,
         top[2] = TYPE(imageLoad(pred, sp + ivec2(min(1, sw - off.x - 1), -1))[comp]);
     }
 
-    TYPE cur = TYPE(0);
-    if (off != ivec2(0, 0))
-        cur = TYPE(imageLoad(pred, sp + ivec2(-1,  0) + yoff_border1)[comp]);
+    TYPE cur = linecache[1];
 
     int base = quant_table[quant_table_idx][0][(cur - top[0]) & MAX_QUANT_TABLE_MASK] +
                quant_table[quant_table_idx][1][(top[0] - top[1]) & MAX_QUANT_TABLE_MASK] +
                quant_table[quant_table_idx][2][(top[1] - top[2]) & MAX_QUANT_TABLE_MASK];
 
     if (has_extend_lookup && extend_lookup) {
-        TYPE cur2 = TYPE(0);
-        if (off.x > 0 && off != ivec2(1, 0)) {
-            const ivec2 yoff_border2 = off.x == 1 ? ivec2(1, -1) : ivec2(0, 0);
-            cur2 = TYPE(imageLoad(pred, sp + ivec2(-2,  0) + yoff_border2)[comp]);
-        }
+        TYPE cur2 = linecache[0];
         base += quant_table[quant_table_idx][3][(cur2 - cur) & MAX_QUANT_TABLE_MASK];
 
         TYPE top2 = TYPE(0);
@@ -249,6 +233,23 @@ ivec2 get_pred(readonly uimage2D pred, ivec2 sp, ivec2 off,
 }
 
 #endif /* RGB */
+
+void linecache_load(readonly uimage2D src, ivec2 sp, int y, uint comp)
+{
+    if (y > 0) {
+        if (gl_LocalInvocationID.x == 0) {
+            TYPE c = TYPE(imageLoad(src, sp + LADDR(ivec2(0, y - 1)))[comp]);
+            linecache = VTYPE2(TYPE(0), c);
+        }
+        barrier();
+    }
+}
+
+void linecache_next(TYPE cur)
+{
+    linecache[0] = linecache[1];
+    linecache[1] = cur;
+}
 
 #endif /* ENCODE || DECODE */
 

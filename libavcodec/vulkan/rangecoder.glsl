@@ -24,239 +24,217 @@
 #define VULKAN_RANGECODER_H
 
 #define CONTEXT_SIZE 32
+#define MAX_OVERREAD 2
 
-layout (set = 0, binding = 0, scalar) readonly buffer rangecoder_buf {
+#if !defined(GOLOMB) && (defined(DECODE))
+#define RC_BTYPE readonly buffer
+#else
+#define RC_BTYPE uniform
+#endif
+
+layout (set = 0, binding = 0, scalar) RC_BTYPE rangecoder_buf {
     uint8_t zero_one_state[512];
 };
 
 struct RangeCoder {
-    uint64_t bytestream_start;
-    uint64_t bytestream;
-    uint64_t bytestream_end;
-
+    uint     bs_start;
+    uint     bs_off;
+    uint     bs_end;
     uint     low;
     uint     range;
     uint16_t outstanding_count;
     uint8_t  outstanding_byte;
 };
 
+shared RangeCoder rc;
 shared uint8_t rc_state[CONTEXT_SIZE];
 shared bool rc_data[CONTEXT_SIZE];
-shared bool rc_dec[CONTEXT_SIZE];
 
-void rac_init(out RangeCoder r, u8buf data, uint buf_size)
+void rac_init(uint bs_start, uint bs_len)
 {
-    r.bytestream_start = uint64_t(data);
-    r.bytestream = uint64_t(data);
-    r.bytestream_end = uint64_t(data) + buf_size;
-    r.low = 0;
-    r.range = 0xFF00;
-    r.outstanding_count = uint16_t(0);
-    r.outstanding_byte = uint8_t(0xFF);
+    rc.bs_start = bs_start;
+    rc.bs_off = bs_start;
+    rc.bs_end = bs_start + bs_len;
+    rc.low = 0;
+    rc.range = 0xFF00;
+    rc.outstanding_count = uint16_t(0);
+    rc.outstanding_byte = uint8_t(0xFF);
 }
 
 #ifdef FULL_RENORM
 /* Full renorm version that can handle outstanding_byte == 0xFF */
-void renorm_encoder(inout RangeCoder c)
+void renorm_encoder(void)
 {
-    int bs_cnt = 0;
-    u8buf bytestream = u8buf(c.bytestream);
-
-    if (c.outstanding_byte == 0xFF) {
-        c.outstanding_byte = uint8_t(c.low >> 8);
-    } else if (c.low <= 0xFF00) {
-        bytestream[bs_cnt++].v = c.outstanding_byte;
-        uint16_t cnt = c.outstanding_count;
+    if (rc.outstanding_byte == 0xFF) {
+        rc.outstanding_byte = uint8_t(rc.low >> 8);
+    } else if (rc.low <= 0xFF00) {
+        slice_data[rc.bs_off++].v = rc.outstanding_byte;
+        uint16_t cnt = rc.outstanding_count;
         for (; cnt > 0; cnt--)
-            bytestream[bs_cnt++].v = uint8_t(0xFF);
-        c.outstanding_count = uint16_t(0);
-        c.outstanding_byte = uint8_t(c.low >> 8);
-    } else if (c.low >= 0x10000) {
-        bytestream[bs_cnt++].v = c.outstanding_byte + uint8_t(1);
-        uint16_t cnt = c.outstanding_count;
+            slice_data[rc.bs_off++].v = uint8_t(0xFF);
+        rc.outstanding_count = uint16_t(0);
+        rc.outstanding_byte = uint8_t(rc.low >> 8);
+    } else if (rc.low >= 0x10000) {
+        slice_data[rc.bs_off++].v = rc.outstanding_byte + uint8_t(1);
+        uint16_t cnt = rc.outstanding_count;
         for (; cnt > 0; cnt--)
-            bytestream[bs_cnt++].v = uint8_t(0x00);
-        c.outstanding_count = uint16_t(0);
-        c.outstanding_byte = uint8_t(bitfieldExtract(c.low, 8, 8));
+            slice_data[rc.bs_off++].v = uint8_t(0x00);
+        rc.outstanding_count = uint16_t(0);
+        rc.outstanding_byte = uint8_t(bitfieldExtract(rc.low, 8, 8));
     } else {
-        c.outstanding_count++;
+        rc.outstanding_count++;
     }
 
-    c.bytestream += bs_cnt;
-    c.range <<= 8;
-    c.low = bitfieldInsert(0, c.low, 8, 8);
+    rc.range <<= 8;
+    rc.low = bitfieldInsert(0, rc.low, 8, 8);
 }
 
 #else
 
 /* Cannot deal with outstanding_byte == -1 in the name of speed */
-void renorm_encoder(inout RangeCoder c)
+void renorm_encoder(void)
 {
-    uint16_t oc = c.outstanding_count + uint16_t(1);
-    uint low = c.low;
+    uint16_t oc = rc.outstanding_count + uint16_t(1);
+    uint low = rc.low;
 
-    c.range <<= 8;
-    c.low = bitfieldInsert(0, low, 8, 8);
+    rc.range <<= 8;
+    rc.low = bitfieldInsert(0, low, 8, 8);
 
     if (low > 0xFF00 && low < 0x10000) {
-        c.outstanding_count = oc;
+        rc.outstanding_count = oc;
         return;
     }
 
-    u8buf bs = u8buf(c.bytestream);
-    uint8_t outstanding_byte = c.outstanding_byte;
+    uint8_t outstanding_byte = rc.outstanding_byte;
 
-    c.bytestream        = uint64_t(bs) + oc;
-    c.outstanding_count = uint16_t(0);
-    c.outstanding_byte  = uint8_t(low >> 8);
+    rc.outstanding_count = uint16_t(0);
+    rc.outstanding_byte  = uint8_t(low >> 8);
 
     uint8_t obs = uint8_t(low > 0xFF00);
     uint8_t fill = obs - uint8_t(1); /* unsigned underflow */
 
-    bs[0].v = outstanding_byte + obs;
+    slice_data[rc.bs_off++].v = outstanding_byte + obs;
     for (int i = 1; i < oc; i++)
-        bs[i].v = fill;
+        slice_data[rc.bs_off++].v = fill;
 }
 #endif
 
-void put_rac_internal(inout RangeCoder c, const uint range1, bool bit)
+void put_rac_internal(in uint range1, bool bit)
 {
 #ifdef DEBUG
-    if (range1 >= c.range)
-        debugPrintfEXT("Error: range1 >= c.range");
+    if (range1 >= rc.range)
+        debugPrintfEXT("Error: range1 >= range");
     if (range1 <= 0)
         debugPrintfEXT("Error: range1 <= 0");
 #endif
 
-    uint ranged = c.range - range1;
-    c.low += bit ? ranged : 0;
-    c.range = bit ? range1 : ranged;
+    uint ranged = rc.range - range1;
+    rc.low += bit ? ranged : 0;
+    rc.range = bit ? range1 : ranged;
 
-    if (expectEXT(c.range < 0x100, false))
-        renorm_encoder(c);
+    if (expectEXT(rc.range < 0x100, false))
+        renorm_encoder();
 }
 
-void put_rac_direct(inout RangeCoder c, inout uint8_t state, bool bit)
+void put_rac(inout uint8_t state, bool bit)
 {
-    put_rac_internal(c, (c.range * state) >> 8, bit);
+    put_rac_internal((rc.range * state) >> 8, bit);
     state = zero_one_state[(uint(bit) << 8) + state];
 }
 
-void put_rac(inout RangeCoder c, uint64_t state, bool bit)
+void put_rac_equi(bool bit)
 {
-    put_rac_direct(c, u8buf(state).v, bit);
+    put_rac_internal(rc.range >> 1, bit);
 }
 
-/* Equiprobable bit */
-void put_rac_equi(inout RangeCoder c, bool bit)
+void put_rac_terminate(void)
 {
-    put_rac_internal(c, c.range >> 1, bit);
-}
-
-void put_rac_terminate(inout RangeCoder c)
-{
-    uint range1 = (c.range * 129) >> 8;
+    uint range1 = (rc.range * 129) >> 8;
 
 #ifdef DEBUG
-    if (range1 >= c.range)
+    if (range1 >= rc.range)
         debugPrintfEXT("Error: range1 >= c.range");
     if (range1 <= 0)
         debugPrintfEXT("Error: range1 <= 0");
 #endif
 
-    c.range -= range1;
-    if (expectEXT(c.range < 0x100, false))
-        renorm_encoder(c);
+    rc.range -= range1;
+    if (expectEXT(rc.range < 0x100, false))
+        renorm_encoder();
 }
 
 /* Return the number of bytes written. */
-uint rac_terminate(inout RangeCoder c)
+uint rac_terminate(void)
 {
-    put_rac_terminate(c);
-    c.range = uint16_t(0xFF);
-    c.low  += 0xFF;
-    renorm_encoder(c);
-    c.range = uint16_t(0xFF);
-    renorm_encoder(c);
+    put_rac_terminate();
+    rc.range = uint16_t(0xFF);
+    rc.low  += 0xFF;
+    renorm_encoder();
+    rc.range = uint16_t(0xFF);
+    renorm_encoder();
 
 #ifdef DEBUG
-    if (c.low != 0)
-        debugPrintfEXT("Error: c.low != 0");
-    if (c.range < 0x100)
+    if (rc.low != 0)
+        debugPrintfEXT("Error: low != 0");
+    if (rc.range < 0x100)
         debugPrintfEXT("Error: range < 0x100");
 #endif
 
-    return uint(uint64_t(c.bytestream) - uint64_t(c.bytestream_start));
+    return rc.bs_off - rc.bs_start;
 }
 
-/* Decoder */
-uint overread = 0;
-bool corrupt = false;
-
-void rac_init_dec(out RangeCoder r, u8buf data, uint buf_size)
+void rac_init_dec(uint bs_start, uint bs_len)
 {
-    overread = 0;
-    corrupt = false;
-
     /* Skip priming bytes */
-    rac_init(r, OFFBUF(u8buf, data, 2), buf_size - 2);
+    rac_init(bs_start + 2, bs_len - 2);
 
-    u8vec2 prime = u8vec2buf(data).v;
+    u8vec2 prime = u8vec2buf(slice_data + bs_start).v;
     /* Switch endianness of the priming bytes */
-    r.low = pack16(prime.yx);
+    rc.low = pack16(prime.yx);
 
-    if (r.low >= 0xFF00) {
-        r.low = 0xFF00;
-        r.bytestream_end = uint64_t(data) + 2;
+    if (rc.low >= 0xFF00) {
+        rc.low = 0xFF00;
+        rc.bs_end = bs_start + 2;
     }
 }
 
-void refill(inout RangeCoder c)
+void refill(void)
 {
-    c.range <<= 8;
-    c.low   <<= 8;
-    if (expectEXT(c.bytestream < c.bytestream_end, false)) {
-        c.low |= u8buf(c.bytestream).v;
-        c.bytestream++;
-    } else {
-        overread++;
-    }
+    rc.range <<= 8;
+    rc.low   <<= 8;
+    if (expectEXT(rc.bs_off < rc.bs_end, true))
+        rc.low |= slice_data[rc.bs_off].v;
+    rc.bs_off++;
 }
 
-bool get_rac_internal(inout RangeCoder c, const uint range1)
+bool get_rac_internal(in uint range1)
 {
-    uint ranged = c.range - range1;
-    bool bit = c.low >= ranged;
-    c.low -= bit ? ranged : 0;
-    c.range = (bit ? 0 : ranged) + (bit ? range1 : 0);
+    uint ranged = rc.range - range1;
+    bool bit = rc.low >= ranged;
+    rc.low -= bit ? ranged : 0;
+    rc.range = (bit ? 0 : ranged) + (bit ? range1 : 0);
 
-    if (expectEXT(c.range < 0x100, false))
-        refill(c);
+    if (expectEXT(rc.range < 0x100, false))
+        refill();
 
     return bit;
 }
 
-bool get_rac_direct(inout RangeCoder c, inout uint8_t state)
+bool get_rac(inout uint8_t state)
 {
-    bool bit = get_rac_internal(c, c.range * state >> 8);
+    bool bit = get_rac_internal(rc.range * state >> 8);
     state = zero_one_state[state + (bit ? 256 : 0)];
     return bit;
 }
 
-bool get_rac_noadapt(inout RangeCoder c, uint idx)
+bool get_rac_state(uint idx)
 {
-    rc_dec[idx] = true;
-    return (rc_data[idx] = get_rac_internal(c, c.range * rc_state[idx] >> 8));
+    return (rc_data[idx] = get_rac_internal(rc.range * rc_state[idx] >> 8));
 }
 
-bool get_rac(inout RangeCoder c, uint64_t state)
+bool get_rac_equi(void)
 {
-    return get_rac_direct(c, u8buf(state).v);
-}
-
-bool get_rac_equi(inout RangeCoder c)
-{
-    return get_rac_internal(c, c.range >> 1);
+    return get_rac_internal(rc.range >> 1);
 }
 
 #endif /* VULKAN_RANGECODER_H */
