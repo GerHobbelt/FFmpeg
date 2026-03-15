@@ -1,7 +1,4 @@
 /*
- * MPEG-1/2 encoder header
- * Copyright (c) 2007 Aurelien Jacobs <aurel@gnuage.org>
- *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -19,19 +16,26 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_MPEG12ENC_H
-#define AVCODEC_MPEG12ENC_H
+#ifndef AVUTIL_MIPS_PIXELUTILS_H
+#define AVUTIL_MIPS_PIXELUTILS_H
 
-#include "mpegvideoenc.h"
+#include <stddef.h>
+#include <stdint.h>
 
-void ff_mpeg1_encode_slice_header(MPVEncContext *s);
+#include "cpu.h"
+#include "libavutil/attributes.h"
+#include "libavutil/cpu.h"
+#include "libavutil/pixelutils.h"
 
-static inline void ff_mpeg1_clean_buffers(MPVEncContext *s)
+int ff_pixelutils_sad16_msa(const uint8_t *src1, ptrdiff_t stride1,
+                            const uint8_t *src2, ptrdiff_t stride2);
+
+static inline av_cold void ff_pixelutils_sad_init_mips(av_pixelutils_sad_fn *sad, int aligned)
 {
-    s->last_dc[0] = 128 << s->c.intra_dc_precision;
-    s->last_dc[1] = s->last_dc[0];
-    s->last_dc[2] = s->last_dc[0];
-    memset(s->c.last_mv, 0, sizeof(s->c.last_mv));
-}
+    int cpu_flags = av_get_cpu_flags();
 
-#endif /* AVCODEC_MPEG12ENC_H */
+    if (have_msa(cpu_flags)) {
+        sad[3] = ff_pixelutils_sad16_msa;
+    }
+}
+#endif
