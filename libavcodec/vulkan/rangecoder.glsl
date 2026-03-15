@@ -20,16 +20,29 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#ifndef VULKAN_RANGECODER_H
+#define VULKAN_RANGECODER_H
+
+#define CONTEXT_SIZE 32
+
+layout (set = 0, binding = 0, scalar) readonly buffer rangecoder_buf {
+    uint8_t zero_one_state[512];
+};
+
 struct RangeCoder {
     uint64_t bytestream_start;
     uint64_t bytestream;
     uint64_t bytestream_end;
 
-    int low;
-    int range;
+    uint     low;
+    uint     range;
     uint16_t outstanding_count;
-    uint8_t outstanding_byte;
+    uint8_t  outstanding_byte;
 };
+
+shared uint8_t rc_state[CONTEXT_SIZE];
+shared bool rc_data[CONTEXT_SIZE];
+shared bool rc_dec[CONTEXT_SIZE];
 
 void rac_init(out RangeCoder r, u8buf data, uint buf_size)
 {
@@ -41,8 +54,6 @@ void rac_init(out RangeCoder r, u8buf data, uint buf_size)
     r.outstanding_count = uint16_t(0);
     r.outstanding_byte = uint8_t(0xFF);
 }
-
-#if !defined(DECODE)
 
 #ifdef FULL_RENORM
 /* Full renorm version that can handle outstanding_byte == 0xFF */
@@ -82,7 +93,7 @@ void renorm_encoder(inout RangeCoder c)
 void renorm_encoder(inout RangeCoder c)
 {
     uint16_t oc = c.outstanding_count + uint16_t(1);
-    int low = c.low;
+    uint low = c.low;
 
     c.range <<= 8;
     c.low = bitfieldInsert(0, low, 8, 8);
@@ -108,7 +119,7 @@ void renorm_encoder(inout RangeCoder c)
 }
 #endif
 
-void put_rac_internal(inout RangeCoder c, const int range1, bool bit)
+void put_rac_internal(inout RangeCoder c, const uint range1, bool bit)
 {
 #ifdef DEBUG
     if (range1 >= c.range)
@@ -117,7 +128,7 @@ void put_rac_internal(inout RangeCoder c, const int range1, bool bit)
         debugPrintfEXT("Error: range1 <= 0");
 #endif
 
-    int ranged = c.range - range1;
+    uint ranged = c.range - range1;
     c.low += bit ? ranged : 0;
     c.range = bit ? range1 : ranged;
 
@@ -144,7 +155,7 @@ void put_rac_equi(inout RangeCoder c, bool bit)
 
 void put_rac_terminate(inout RangeCoder c)
 {
-    int range1 = (c.range * 129) >> 8;
+    uint range1 = (c.range * 129) >> 8;
 
 #ifdef DEBUG
     if (range1 >= c.range)
@@ -159,7 +170,7 @@ void put_rac_terminate(inout RangeCoder c)
 }
 
 /* Return the number of bytes written. */
-uint32_t rac_terminate(inout RangeCoder c)
+uint rac_terminate(inout RangeCoder c)
 {
     put_rac_terminate(c);
     c.range = uint16_t(0xFF);
@@ -175,10 +186,8 @@ uint32_t rac_terminate(inout RangeCoder c)
         debugPrintfEXT("Error: range < 0x100");
 #endif
 
-    return uint32_t(uint64_t(c.bytestream) - uint64_t(c.bytestream_start));
+    return uint(uint64_t(c.bytestream) - uint64_t(c.bytestream_start));
 }
-
-#else
 
 /* Decoder */
 uint overread = 0;
@@ -214,9 +223,9 @@ void refill(inout RangeCoder c)
     }
 }
 
-bool get_rac_internal(inout RangeCoder c, const int range1)
+bool get_rac_internal(inout RangeCoder c, const uint range1)
 {
-    int ranged = c.range - range1;
+    uint ranged = c.range - range1;
     bool bit = c.low >= ranged;
     c.low -= bit ? ranged : 0;
     c.range = (bit ? 0 : ranged) + (bit ? range1 : 0);
@@ -234,6 +243,12 @@ bool get_rac_direct(inout RangeCoder c, inout uint8_t state)
     return bit;
 }
 
+bool get_rac_noadapt(inout RangeCoder c, uint idx)
+{
+    rc_dec[idx] = true;
+    return (rc_data[idx] = get_rac_internal(c, c.range * rc_state[idx] >> 8));
+}
+
 bool get_rac(inout RangeCoder c, uint64_t state)
 {
     return get_rac_direct(c, u8buf(state).v);
@@ -244,4 +259,4 @@ bool get_rac_equi(inout RangeCoder c)
     return get_rac_internal(c, c.range >> 1);
 }
 
-#endif
+#endif /* VULKAN_RANGECODER_H */

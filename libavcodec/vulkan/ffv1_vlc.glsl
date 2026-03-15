@@ -20,8 +20,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#define VLC_STATE_SIZE 8
-layout(buffer_reference, buffer_reference_align = VLC_STATE_SIZE) buffer VlcState {
+#ifndef VULKAN_FFV1_VLC_H
+#define VULKAN_FFV1_VLC_H
+
+struct VlcState {
     uint32_t error_sum;
     int16_t  drift;
     int8_t   bias;
@@ -157,3 +159,5 @@ int read_vlc_symbol(inout GetBitContext gb, inout VlcState state, int bits)
 
     return ret;
 }
+
+#endif /* VULKAN_FFV1_VLC_H */
