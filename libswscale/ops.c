@@ -144,16 +144,17 @@ SwsCompMask ff_sws_comp_mask_q4(const AVRational q[4])
     return mask;
 }
 
-SwsCompMask ff_sws_comp_mask_swizzle(const SwsCompMask mask, const SwsSwizzleOp swiz)
+void ff_sws_comp_mask_swizzle(SwsCompMask *mask, const SwsSwizzleOp *swiz)
 {
+    const SwsCompMask orig = *mask;
     SwsCompMask res = 0;
     for (int i = 0; i < 4; i++) {
-        const int src = swiz.in[i];
-        if (SWS_COMP_TEST(mask, src))
+        const int src = swiz->in[i];
+        if (SWS_COMP_TEST(orig, src))
             res |= SWS_COMP(i);
     }
 
-    return res;
+    *mask = res;
 }
 
 SwsCompMask ff_sws_comp_mask_needed(const SwsOp *op)
@@ -170,8 +171,9 @@ int ff_sws_rw_op_planes(const SwsOp *op)
 {
     av_assert2(op->op == SWS_OP_READ || op->op == SWS_OP_WRITE);
     switch (op->rw.mode) {
-    case SWS_RW_PLANAR: return op->rw.elems;
-    case SWS_RW_PACKED: return 1;
+    case SWS_RW_PLANAR:  return op->rw.elems;
+    case SWS_RW_PACKED:  return 1;
+    case SWS_RW_PALETTE: return 2;
     }
 
     av_unreachable("Invalid read/write mode!");
@@ -361,7 +363,6 @@ void ff_sws_op_list_update_comps(SwsOpList *ops)
         SwsOp *op = &ops->ops[n];
 
         switch (op->op) {
-        case SWS_OP_READ:
         case SWS_OP_LINEAR:
         case SWS_OP_DITHER:
         case SWS_OP_SWAP_BYTES:
@@ -384,19 +385,15 @@ void ff_sws_op_list_update_comps(SwsOpList *ops)
             for (int i = 0; i < op->rw.elems; i++) {
                 int idx = 0;
                 switch (op->rw.mode) {
-                case SWS_RW_PACKED: idx = i; break;
-                case SWS_RW_PLANAR: idx = ops->plane_src[i]; break;
+                case SWS_RW_PALETTE: idx = i; break;
+                case SWS_RW_PACKED:  idx = i; break;
+                case SWS_RW_PLANAR:  idx = ops->plane_src[i]; break;
                 }
 
                 av_assert0(!(ops->comps_src.flags[idx] & SWS_COMP_GARBAGE));
                 op->comps.flags[i] = ops->comps_src.flags[idx];
                 op->comps.min[i]   = ops->comps_src.min[idx];
                 op->comps.max[i]   = ops->comps_src.max[idx];
-            }
-            for (int i = op->rw.elems; i < 4; i++) {
-                op->comps.flags[i] = prev.flags[i];
-                op->comps.min[i]   = prev.min[i];
-                op->comps.max[i]   = prev.max[i];
             }
 
             if (op->rw.filter.op) {
@@ -773,12 +770,12 @@ int ff_sws_op_list_max_size(const SwsOpList *ops)
     return max_size;
 }
 
-uint32_t ff_sws_linear_mask(const SwsLinearOp c)
+uint32_t ff_sws_linear_mask(const SwsLinearOp *c)
 {
     uint32_t mask = 0;
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 5; j++) {
-            if (av_cmp_q(c.m[i][j], Q(i == j)))
+            if (av_cmp_q(c->m[i][j], Q(i == j)))
                 mask |= SWS_MASK(i, j);
         }
     }
@@ -869,8 +866,9 @@ static void print_q4(AVBPrint *bp, const AVRational q4[4], SwsCompMask mask)
 }
 
 static const char *const rw_mode_names[] = {
-    [SWS_RW_PLANAR] = "planar",
-    [SWS_RW_PACKED] = "packed",
+    [SWS_RW_PLANAR]     = "planar",
+    [SWS_RW_PACKED]     = "packed",
+    [SWS_RW_PALETTE]    = "palette"
 };
 
 void ff_sws_op_desc(AVBPrint *bp, const SwsOp *op)

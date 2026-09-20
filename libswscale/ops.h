@@ -96,6 +96,7 @@ typedef enum SwsReadWriteMode {
      */
     SWS_RW_PLANAR,  /* one plane per component */
     SWS_RW_PACKED,  /* all components on a single plane */
+    SWS_RW_PALETTE, /* plane 0 is 8-bit index, plane 1 is packed palette */
 } SwsReadWriteMode;
 
 typedef struct SwsReadWriteOp {
@@ -106,6 +107,7 @@ typedef struct SwsReadWriteOp {
      *   rgb565    = 1x u16   <- use SWS_OP_UNPACK to unpack
      *   monow     = 1x u8 (frac 3)
      *   rgb4      = 1x u8 (frac 1)
+     *   pal8      = 4x u8 (palette)
      */
     SwsReadWriteMode mode; /* how data is laid out in memory */
     uint8_t elems; /* number of elements (of type `op.type`) to read/write */
@@ -146,7 +148,7 @@ typedef struct SwsSwizzleOp {
 } SwsSwizzleOp;
 
 #define SWS_SWIZZLE(X,Y,Z,W) ((SwsSwizzleOp) { .in = {X, Y, Z, W} })
-SwsCompMask ff_sws_comp_mask_swizzle(SwsCompMask mask, SwsSwizzleOp swiz);
+void ff_sws_comp_mask_swizzle(SwsCompMask *mask, const SwsSwizzleOp *swiz);
 
 typedef struct SwsShiftOp {
     uint8_t amount; /* number of bits to shift */
@@ -216,7 +218,7 @@ enum {
 };
 
 /* Helper function to compute the correct mask */
-uint32_t ff_sws_linear_mask(SwsLinearOp);
+uint32_t ff_sws_linear_mask(const SwsLinearOp *c);
 
 typedef struct SwsFilterOp {
     SwsFilterWeights *kernel; /* filter kernel (refstruct) */
