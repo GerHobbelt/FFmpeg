@@ -300,14 +300,14 @@ static const CheckasmTest tests[] = {
 #endif
 #if CONFIG_AVUTIL
         { "aes",       checkasm_check_aes },
-        { "crc",       checkasm_check_crc },
+        { "crc",       checkasm_check_crc,   .uninit = checkasm_uninit_crc },
         { "fixed_dsp", checkasm_check_fixed_dsp },
         { "float_dsp", checkasm_check_float_dsp },
         { "lls",       checkasm_check_lls },
 #if CONFIG_PIXELUTILS
         { "pixelutils",checkasm_check_pixelutils },
 #endif
-        { "av_tx",     checkasm_check_av_tx },
+        { "av_tx",     checkasm_check_av_tx, .uninit = checkasm_uninit_tx },
 #endif
     { NULL }
     /* NOTE: When adding a new test to this list here, it also needs to be
