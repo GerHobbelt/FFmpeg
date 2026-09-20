@@ -1,4 +1,8 @@
 /*
+ * FFv1 codec
+ *
+ * Copyright (c) 2026 Lynne <dev@lynne.ee>
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,30 +20,13 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_shader_image_load_formatted : require
 
-#ifndef AVUTIL_HWCONTEXT_AMF_INTERNAL_H
-#define AVUTIL_HWCONTEXT_AMF_INTERNAL_H
-#include <AMF/core/Factory.h>
-#include <AMF/core/Context.h>
+layout (set = 1, binding = 5) writeonly uniform image2D dst[];
 
-/**
-* Error handling helper
-*/
-#define AMF_RETURN_IF_FALSE(avctx, exp, ret_value, /*message,*/ ...) \
-    if (!(exp)) { \
-        av_log(avctx, AV_LOG_ERROR, __VA_ARGS__); \
-        return ret_value; \
-    }
-
-#define AMF_GOTO_FAIL_IF_FALSE(avctx, exp, ret_value, /*message,*/ ...) \
-    if (!(exp)) { \
-        av_log(avctx, AV_LOG_ERROR, __VA_ARGS__); \
-        ret = ret_value; \
-        goto fail; \
-    }
-
-#define AMF_TIME_BASE_Q          (AVRational){1, AMF_SECOND}
-
-#define AMF_IFACE_CALL(this, function, ...) ((this)->pVtbl->function((this), ##__VA_ARGS__))
-
-#endif /* AVUTIL_HWCONTEXT_AMF_INTERNAL_H */
+#define GOLOMB
+#define FLOAT
+#define RGB
+#include "ffv1_dec.comp.glsl"
