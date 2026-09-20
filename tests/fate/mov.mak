@@ -208,6 +208,19 @@ fate-mov-mp4-fragmented-ttml-dfxp: CMD = transcode srt $(TARGET_SAMPLES)/sub/Sub
   "-f lavfi -i smptehdbars=duration=24.5245:size=320x180:rate=24000/1001,format=yuv420p" \
   "" "" "data"
 
+define FATE_MOV_CENC_TEST
+FATE_MOV_FFMPEG_SAMPLES-$(call REMUX, MP4 $(4), MOV_DEMUXER $(2)_PARSER EXTRACT_EXTRADATA_BSF) += fate-mov-$(1)-cenc
+fate-mov-$(1)-cenc: CMD = transcode $(3) $(TARGET_SAMPLES)/$(5) mp4 \
+    "-c:v copy -encryption_scheme cenc-aes-ctr -encryption_key 00112233445566778899aabbccddeeff -encryption_kid 00112233445566778899aabbccddeeff" \
+    "-c:v copy" "" "" "-decryption_key 00112233445566778899aabbccddeeff"
+endef
+
+$(eval $(call FATE_MOV_CENC_TEST,av1,AV1,ivf,IVF,av1/non_uniform_tiling.ivf))
+$(eval $(call FATE_MOV_CENC_TEST,h264,H264,h264,H264,h264-conformance/CAMACI3_Sony_C.jsv))
+$(eval $(call FATE_MOV_CENC_TEST,h264_iso,H264,matroska,MATROSKA,h264/dts_5frames.mkv))
+$(eval $(call FATE_MOV_CENC_TEST,hevc,HEVC,hevc,HEVC,hevc-conformance/ipcm_A_NEC_3.bit))
+$(eval $(call FATE_MOV_CENC_TEST,hevc_iso,HEVC,mov,MOV,hevc/extradata-reload-multi-stsd.mov))
+
 # avif demuxing - still image with 1 item.
 FATE_MOV_FFMPEG_SAMPLES-$(call FRAMECRC, MOV, AV1, AV1_PARSER) \
                            += fate-mov-avif-demux-still-image-1-item
@@ -312,6 +325,22 @@ fate-mov-vfr: REF = 1558b4a9398d8635783c93f84eb5a60d
 FATE_MOV_FFMPEG_FFPROBE-$(call ALLYES, COLOR_FILTER SETPTS_FILTER MPEG4_ENCODER \
                                       MOV_MUXER MOV_DEMUXER FILE_PROTOCOL)      \
                                       += fate-mov-vfr-bframes-derived-duration
+
+FATE_MOV_FFMPEG_FFPROBE-$(call ALLYES, COLOR_FILTER SETPTS_FILTER MPEG4_ENCODER \
+                                      MP4_MUXER MOV_DEMUXER FILE_PROTOCOL)      \
+                                      += fate-mov-trun-large-sample-duration
+
+# Generate a fragmented VFR file, then replace the last sample duration in
+# its first trun with UINT32_MAX.
+fate-mov-trun-large-sample-duration: CMD = run_with_patched_temp \
+    "$(FFMPEG) -nostdin -v error \
+    -filter_complex color=c=black:s=2x2:r=1,setpts=N*N \
+    -frames:v 10 -fps_mode vfr -c:v mpeg4 -g 5 -bf 0 -q:v 2 -threads 1 \
+    -flags +bitexact -fflags +bitexact \
+    -movflags empty_moov+frag_keyframe+default_base_moof -f mp4 -y" \
+    "ffprobe$(PROGSSUF)$(EXESUF) -show_packets \
+    -show_entries packet=pts,dts,duration -print_format compact \
+    -select_streams v -v 0" mp4 923 "\\0377\\0377\\0377\\0377"
 
 # Create VFR B-frames whose presentation durations are not a permutation of
 # the STTS sample deltas.
