@@ -136,13 +136,8 @@ void ff_sws_uop_name(const SwsUOp *op, char buf[SWS_UOP_NAME_MAX])
         av_bprintf(&bp, "%s_", ff_sws_pixel_type_name(op->type));
     av_bprintf(&bp, "%s", uop_names[op->uop].abbr);
 
-    if (op->mask) {
-        av_bprint_chars(&bp, '_', 1);
-        for (int i = 0; i < 4; i++) {
-            if (SWS_COMP_TEST(op->mask, i))
-                av_bprint_chars(&bp, "xyzw"[i], 1);
-        }
-    }
+    if (op->mask)
+        av_bprintf(&bp, "_%s", ff_sws_comp_mask_str(op->mask));
 
     const SwsUOpParams *par = &op->par;
     switch (op->uop) {
@@ -952,7 +947,8 @@ static int register_all_uops(SwsContext *ctx, void *graph, SwsOpList *ops)
     if (!copy)
         return AVERROR(ENOMEM);
 
-    return ff_sws_compile_pass(graph, &backend_uops, &copy, 0, NULL, NULL);
+    const int flags = SWS_OP_FLAG_DRY_RUN | SWS_OP_FLAG_SPLIT_MEMCPY;
+    return ff_sws_compile_pass(graph, &backend_uops, &copy, flags, NULL, NULL);
 }
 
 static const SwsFlags flags[] = {
