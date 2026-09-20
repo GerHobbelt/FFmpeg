@@ -41,15 +41,16 @@ int ff_sws_uop_cmp(const SwsUOp *a, const SwsUOp *b)
 }
 
 static const struct {
-    char full[24];
-    char abbr[16];
-    char macro[16];
+    char full[32];
+    char abbr[32];
+    char macro[32];
 } uop_names[SWS_UOP_TYPE_NB] = {
 #define UOP_NAME(OP, ABBR) [SWS_UOP_##OP] = { "SWS_UOP_" #OP, ABBR, #OP }
     UOP_NAME(INVALID,           "invalid"),
     UOP_NAME(READ_PLANAR,       "read_planar"),
     UOP_NAME(READ_PLANAR_FH,    "read_planar_fh"),
     UOP_NAME(READ_PLANAR_FV,    "read_planar_fv"),
+    UOP_NAME(READ_PLANAR_FV_FMA,"read_planar_fv_fma"),
     UOP_NAME(READ_PACKED,       "read_packed"),
     UOP_NAME(READ_NIBBLE,       "read_nibble"),
     UOP_NAME(READ_BIT,          "read_bit"),
@@ -59,6 +60,7 @@ static const struct {
     UOP_NAME(WRITE_BIT,         "write_bit"),
     UOP_NAME(PERMUTE,           "permute"),
     UOP_NAME(COPY,              "copy"),
+    UOP_NAME(MOVE,              "move"),
     UOP_NAME(SWAP_BYTES,        "swap_bytes"),
     UOP_NAME(EXPAND_BIT,        "expand_bit"),
     UOP_NAME(EXPAND_PAIR,       "expand_pair"),
@@ -69,6 +71,7 @@ static const struct {
     UOP_NAME(TO_F32,            "to_f32"),
     UOP_NAME(SCALE,             "scale"),
     UOP_NAME(LINEAR,            "linear"),
+    UOP_NAME(LINEAR_FMA,        "linear_fma"),
     UOP_NAME(ADD,               "add"),
     UOP_NAME(MIN,               "min"),
     UOP_NAME(MAX,               "max"),
@@ -142,6 +145,11 @@ void ff_sws_uop_name(const SwsUOp *op, char buf[SWS_UOP_NAME_MAX])
 
     const SwsUOpParams *par = &op->par;
     switch (op->uop) {
+    case SWS_UOP_READ_PLANAR_FH:
+    case SWS_UOP_READ_PLANAR_FV:
+    case SWS_UOP_READ_PLANAR_FV_FMA:
+        av_bprintf(&bp, "_%s", ff_sws_pixel_type_name(par->filter.type));
+        break;
     case SWS_UOP_LSHIFT:
     case SWS_UOP_RSHIFT:
         av_bprintf(&bp, "_%u", par->shift.amount);
@@ -153,6 +161,14 @@ void ff_sws_uop_name(const SwsUOp *op, char buf[SWS_UOP_NAME_MAX])
             if (SWS_COMP_TEST(op->mask, i))
                 av_bprint_chars(&bp, "xyzw"[par->swizzle.in[i]], 1);
         }
+        break;
+    case SWS_UOP_MOVE:
+        av_bprint_chars(&bp, '_', 1);
+        for (int i = 0; i < par->move.num_moves; i++)
+            av_bprint_chars(&bp, "txyzw"[par->move.dst[i] + 1], 1);
+        av_bprint_chars(&bp, '_', 1);
+        for (int i = 0; i < par->move.num_moves; i++)
+            av_bprint_chars(&bp, "txyzw"[par->move.src[i] + 1], 1);
         break;
     case SWS_UOP_PACK:
     case SWS_UOP_UNPACK:
@@ -174,6 +190,7 @@ void ff_sws_uop_name(const SwsUOp *op, char buf[SWS_UOP_NAME_MAX])
         }
         break;
     case SWS_UOP_LINEAR:
+    case SWS_UOP_LINEAR_FMA:
         for (int i = 0; i < 4; i++) {
             if (!SWS_COMP_TEST(op->mask, i))
                 continue;
@@ -183,6 +200,8 @@ void ff_sws_uop_name(const SwsUOp *op, char buf[SWS_UOP_NAME_MAX])
                     av_bprint_chars(&bp, '1', 1);
                 else if (par->lin.zero & SWS_MASK(i, j))
                     av_bprint_chars(&bp, '0', 1);
+                else if (par->lin.exact & SWS_MASK(i, j))
+                    av_bprint_chars(&bp, 'X', 1);
                 else
                     av_bprint_chars(&bp, 'x', 1);
             }
@@ -214,6 +233,11 @@ static int generate_entry_struct(void *opaque, void *key)
 
     const SwsUOpParams *par = &uop->par;
     switch (uop->uop) {
+    case SWS_UOP_READ_PLANAR_FH:
+    case SWS_UOP_READ_PLANAR_FV:
+    case SWS_UOP_READ_PLANAR_FV_FMA:
+        av_bprintf(bp, ", .par.filter.type = %s", pixel_types[par->filter.type].full);
+        break;
     case SWS_UOP_LSHIFT:
     case SWS_UOP_RSHIFT:
         av_bprintf(bp, ", .par.shift.amount = %u", par->shift.amount);
@@ -223,6 +247,15 @@ static int generate_entry_struct(void *opaque, void *key)
         av_bprintf(bp, ", .par.swizzle.in = {%d, %d, %d, %d}",
                    par->swizzle.in[0], par->swizzle.in[1],
                    par->swizzle.in[2], par->swizzle.in[3]);
+        break;
+    case SWS_UOP_MOVE:
+        av_bprintf(bp, ", .par.move.num_moves = %d", par->move.num_moves);
+        av_bprintf(bp, ", .par.move.dst = {%d, %d, %d, %d, %d, %d}",
+                   par->move.dst[0], par->move.dst[1], par->move.dst[2],
+                   par->move.dst[3], par->move.dst[4], par->move.dst[5]);
+        av_bprintf(bp, ", .par.move.src = {%d, %d, %d, %d, %d, %d}",
+                   par->move.src[0], par->move.src[1], par->move.src[2],
+                   par->move.src[3], par->move.src[4], par->move.src[5]);
         break;
     case SWS_UOP_PACK:
     case SWS_UOP_UNPACK:
@@ -235,8 +268,11 @@ static int generate_entry_struct(void *opaque, void *key)
                    par->clear.one, par->clear.zero);
         break;
     case SWS_UOP_LINEAR:
+    case SWS_UOP_LINEAR_FMA:
         av_bprintf(bp, ", .par.lin.one = 0x%x, .par.lin.zero = 0x%x",
                    par->lin.one, par->lin.zero);
+        if (uop->uop == SWS_UOP_LINEAR_FMA)
+            av_bprintf(bp, ", .par.lin.exact = 0x%x", par->lin.exact);
         break;
     case SWS_UOP_DITHER:
         av_bprintf(bp, ", .par.dither = { .y_offset = {%u, %u, %u, %u}, .size_log2 = %u }",
@@ -262,6 +298,11 @@ static int generate_entry_args(void *opaque, void *key)
 
     const SwsUOpParams *par = &uop->par;
     switch (uop->uop) {
+    case SWS_UOP_READ_PLANAR_FH:
+    case SWS_UOP_READ_PLANAR_FV:
+    case SWS_UOP_READ_PLANAR_FV_FMA:
+        av_bprintf(bp, ", %s", pixel_types[par->filter.type].full);
+        break;
     case SWS_UOP_LSHIFT:
     case SWS_UOP_RSHIFT:
         av_bprintf(bp, ", %u", par->shift.amount);
@@ -271,6 +312,15 @@ static int generate_entry_args(void *opaque, void *key)
         av_bprintf(bp, ", %d, %d, %d, %d",
                    par->swizzle.in[0], par->swizzle.in[1],
                    par->swizzle.in[2], par->swizzle.in[3]);
+        break;
+    case SWS_UOP_MOVE:
+        av_bprintf(bp, ", %d", par->move.num_moves);
+        av_bprintf(bp, ", %d, %d, %d, %d, %d, %d",
+                   par->move.dst[0], par->move.dst[1], par->move.dst[2],
+                   par->move.dst[3], par->move.dst[4], par->move.dst[5]);
+        av_bprintf(bp, ", %d, %d, %d, %d, %d, %d",
+                   par->move.src[0], par->move.src[1], par->move.src[2],
+                   par->move.src[3], par->move.src[4], par->move.src[5]);
         break;
     case SWS_UOP_PACK:
     case SWS_UOP_UNPACK:
@@ -282,7 +332,10 @@ static int generate_entry_args(void *opaque, void *key)
         av_bprintf(bp, ", 0x%05x, 0x%05x", par->clear.one, par->clear.zero);
         break;
     case SWS_UOP_LINEAR:
+    case SWS_UOP_LINEAR_FMA:
         av_bprintf(bp, ", 0x%05x, 0x%05x", par->lin.one, par->lin.zero);
+        if (uop->uop == SWS_UOP_LINEAR_FMA)
+            av_bprintf(bp, ", 0x%05x", par->lin.exact);
         break;
     case SWS_UOP_DITHER:
         av_bprintf(bp, ", %u, %u, %u, %u, %u",
@@ -304,6 +357,7 @@ static void uop_uninit(SwsUOp *uop)
         break;
     case SWS_UOP_READ_PLANAR_FH:
     case SWS_UOP_READ_PLANAR_FV:
+    case SWS_UOP_READ_PLANAR_FV_FMA:
         av_refstruct_unref(&uop->data.kernel);
         break;
     }
@@ -364,7 +418,55 @@ static SwsPixelType pixel_type_to_int(const SwsPixelType type)
     return SWS_PIXEL_NONE;
 }
 
-static int translate_rw_op(SwsUOpList *ops, const SwsOp *op)
+static bool exact_product_f32(float a, float b)
+{
+    volatile float prod   = a * b;
+    volatile float result = b ? prod / b : 0.0f;
+    return !b || result == a;
+}
+
+static bool exact_prod(SwsPixelType type, SwsPixel coef,
+                       const SwsComps *comps, int idx)
+{
+    const AVRational minq = comps->min[idx];
+    const AVRational maxq = comps->max[idx];
+    if (ff_sws_pixel_type_is_int(type))
+        return true;
+    else if (!minq.den || !maxq.den)
+        return false; /* unknown bounds */
+
+    const SwsPixel min = pixel_from_q(type, minq);
+    const SwsPixel max = pixel_from_q(type, maxq);
+    switch (type) {
+    case SWS_PIXEL_F32:
+        return exact_product_f32(coef.f32, min.f32) &&
+               exact_product_f32(coef.f32, max.f32);
+    }
+
+    av_unreachable("Invalid pixel type!");
+    return false;
+}
+
+static bool check_filter_fma(SwsContext *ctx, SwsUOpFlags flags, const SwsOp *op)
+{
+    if (!(flags & SWS_UOP_FLAG_FMA))
+        return false;
+    if (!(ctx->flags & SWS_BITEXACT))
+        return true;
+    if (!ff_sws_pixel_type_is_int(op->type))
+        return false;
+
+    const int bits = ff_sws_pixel_type_size(op->type) * 8;
+    const uint64_t max_val = UINT64_MAX >> (64 - bits);
+
+    /* Maximum value representable losslessly as float. Note that this is
+     * currently true only for U8, but that may change if we ever update the
+     * value of SWS_FILTER_SCALE. */
+    return max_val * SWS_FILTER_SCALE <= (1 << 22);
+}
+
+static int translate_rw_op(SwsContext *ctx, SwsUOpList *ops, SwsUOpFlags flags,
+                           const SwsOp *op)
 {
     SwsUOp uop = {
         .type = op->type,
@@ -380,10 +482,15 @@ static int translate_rw_op(SwsUOpList *ops, const SwsOp *op)
     if (op->rw.filter) {
         if (op->op == SWS_OP_WRITE || op->rw.frac || op->rw.packed)
             return AVERROR(ENOTSUP);
-        uop.uop = op->rw.filter == SWS_OP_FILTER_H
-                    ? SWS_UOP_READ_PLANAR_FH
-                    : SWS_UOP_READ_PLANAR_FV;
+        uop.par.filter.type = SWS_PIXEL_F32;
         uop.data.kernel = av_refstruct_ref(op->rw.kernel);
+        if (op->rw.filter == SWS_OP_FILTER_H) {
+            uop.uop = SWS_UOP_READ_PLANAR_FH;
+        } else if (check_filter_fma(ctx, flags, op)) {
+            uop.uop = SWS_UOP_READ_PLANAR_FV_FMA;
+        } else {
+            uop.uop = SWS_UOP_READ_PLANAR_FV;
+        }
     } else if (op->rw.packed && op->rw.elems > 1) {
         if (op->rw.frac)
             return AVERROR(ENOTSUP);
@@ -400,8 +507,93 @@ static int translate_rw_op(SwsUOpList *ops, const SwsOp *op)
     return ff_sws_uop_list_append(ops, &uop);
 }
 
-static int translate_swizzle(SwsUOpList *ops, const SwsOp *op)
+static int count_idx(const int *arr, size_t size, int val)
 {
+    int num = 0;
+    for (size_t i = 0; i < size; i++) {
+        if (arr[i] == val)
+            num++;
+    }
+
+    return num;
+}
+
+static int translate_move(SwsUOpList *ops, const SwsOp *op)
+{
+    SwsUOp uop = {
+        .uop  = SWS_UOP_MOVE,
+        .type = pixel_type_to_int(op->type),
+    };
+    SwsMoveUOp *par = &uop.par.move;
+
+    /* Mask of components that are not yet satisfied */
+    SwsCompMask todo = ff_sws_comp_mask_needed(op);
+    for (int i = 0; i < 4; i++) {
+        if (op->swizzle.in[i] == i)
+            todo &= ~SWS_COMP(i);
+    }
+
+    /* Mask of components whose value is required for the final output */
+    SwsCompMask needed = 0;
+    for (int i = 0; i < 4; i++) {
+        if (SWS_OP_NEEDED(op, i))
+            needed |= SWS_COMP(op->swizzle.in[i]);
+    }
+
+    /* Current mapping of registers to components */
+    int idx[4 + 1] = { 0, 1, 2, 3, -1 }; /* +1 for tmp */
+
+    /* Decompose the swizzle mask into a series of register-register moves */
+    while (todo) {
+        int dst = -1, src = -1;
+
+        /* Find next unsatisfied dst <- src move that doesn't clobber a value */
+        for (dst = 0; dst < 4; dst++) {
+            if (!SWS_COMP_TEST(todo, dst))
+                continue; /* already satisfied */
+            const int cur = idx[dst];
+            if (count_idx(idx, FF_ARRAY_ELEMS(idx), cur) == 1 && SWS_COMP_TEST(needed, cur))
+                continue; /* clobbers last remaining, still-needed value */
+            for (src = 0; src < FF_ARRAY_ELEMS(idx); src++) {
+                if (idx[src] == op->swizzle.in[dst]) {
+                    /* Prevent read-after-write dependency. */
+                    if (par->num_moves > 0 && src == par->dst[par->num_moves - 1])
+                        src = par->src[par->num_moves - 1];
+                    break;
+                }
+            }
+            av_assert1(src < FF_ARRAY_ELEMS(idx));
+            todo &= ~SWS_COMP(dst);
+            break;
+        }
+
+        if (dst == 4) {
+            /* Stuck in a cycle, break it by saving to the scratch register */
+            dst = 4;
+            for (src = 0; src < 4; src++) {
+                if (SWS_COMP_TEST(todo, src)) {
+                    needed &= ~SWS_COMP(idx[src]);
+                    break;
+                }
+            }
+            av_assert1(src < 4);
+        }
+
+        av_assert0(par->num_moves < SWS_UOP_MOVE_MAX);
+        par->dst[par->num_moves] = dst > 3 ? -1 : dst;
+        par->src[par->num_moves] = src > 3 ? -1 : src;
+        par->num_moves++;
+        idx[dst] = idx[src];
+    }
+
+    return ff_sws_uop_list_append(ops, &uop);
+}
+
+static int translate_swizzle(SwsUOpList *ops, SwsUOpFlags flags, const SwsOp *op)
+{
+    if (flags & SWS_UOP_FLAG_MOVE)
+        return translate_move(ops, op);
+
     SwsUOp uop = {
         .type = pixel_type_to_int(op->type),
         .uop  = SWS_UOP_PERMUTE,
@@ -499,24 +691,38 @@ static int translate_dither_op(SwsUOpList *ops, const SwsOp *op)
     return ff_sws_uop_list_append(ops, &uop);
 }
 
-static int translate_linear_op(SwsUOpList *ops, const SwsOp *op)
+static int translate_linear_op(SwsContext *ctx, SwsUOpList *ops,
+                               SwsUOpFlags flags, const SwsOp *op,
+                               const SwsComps *input)
 {
     SwsUOp uop = {
         .type = op->type,
         .uop  = SWS_UOP_LINEAR,
     };
 
+    const bool bitexact = ctx->flags & SWS_BITEXACT;
+    uint32_t exact = 0;
+
     for (int i = 0; i < 4; i++) {
         if (SWS_OP_NEEDED(op, i) && (op->lin.mask & SWS_MASK_ROW(i)))
             uop.mask |= SWS_COMP(i);
         for (int j = 0; j < 5; j++) {
             const AVRational k = op->lin.m[i][j];
-            uop.data.mat4[i][j] = Q2PIXEL(k);
+            const SwsPixel px = Q2PIXEL(k);
+            uop.data.mat4[i][j] = px;
             if (k.num == 0)
                 uop.par.lin.zero |= SWS_MASK(i, j);
             else if (k.num == k.den)
                 uop.par.lin.one |= SWS_MASK(i, j);
+            else if (j < 4 && (!bitexact || exact_prod(uop.type, px, input, j)))
+                exact |= SWS_MASK(i, j);
         }
+    }
+
+    if (flags & SWS_UOP_FLAG_FMA) {
+        /* multiplication by 1 and 0 are always exact by definition */
+        uop.uop = SWS_UOP_LINEAR_FMA;
+        uop.par.lin.exact = exact | uop.par.lin.zero | uop.par.lin.one;
     }
 
     return ff_sws_uop_list_append(ops, &uop);
@@ -549,13 +755,13 @@ static int translate_op(SwsContext *ctx, SwsUOpList *uops, SwsUOpFlags flags,
         return AVERROR(ENOTSUP); /* always handled by subpass splitting */
     case SWS_OP_READ:
     case SWS_OP_WRITE:
-        return translate_rw_op(uops, op);
+        return translate_rw_op(ctx, uops, flags, op);
     case SWS_OP_SWIZZLE:
-        return translate_swizzle(uops, op);
+        return translate_swizzle(uops, flags, op);
     case SWS_OP_DITHER:
         return translate_dither_op(uops, op);
     case SWS_OP_LINEAR:
-        return translate_linear_op(uops, op);
+        return translate_linear_op(ctx, uops, flags, op, input);
     default:
         break;
     }
@@ -675,7 +881,7 @@ static int register_uop(struct AVTreeNode **root, const SwsUOp *uop)
     return 0;
 }
 
-static int register_flags(SwsContext *ctx, SwsOpList *ops, SwsUOpFlags flags)
+static int register_flags(SwsContext *ctx, const SwsOpList *ops, SwsUOpFlags flags)
 {
     SwsUOpList *uops = ff_sws_uop_list_alloc();
     if (!uops)
@@ -699,9 +905,11 @@ fail:
 
 static const SwsUOpFlags uop_flags[] = {
     0,
+    SWS_UOP_FLAG_FMA | SWS_UOP_FLAG_MOVE, /* x86 backend */
 };
 
-static int register_uops(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
+static int register_uops(SwsContext *ctx, const SwsOpList *ops,
+                         SwsCompiledOp *out)
 {
     for (int i = 0; i < FF_ARRAY_ELEMS(uop_flags); i++) {
         int ret = register_flags(ctx, ops, uop_flags[i]);
@@ -731,9 +939,9 @@ static int register_all_uops(SwsContext *ctx, void *graph, SwsOpList *ops)
 
 static const SwsFlags flags[] = {
     0,
-
-    /* SWS_ACCURATE_RND may insert extra 1x1 dither ops (for accurate rounding) */
-    SWS_ACCURATE_RND,
+    SWS_ACCURATE_RND,   /* may insert extra 1x1 dither ops (for accurate rounding) */
+    SWS_BITEXACT,       /* prevents some FMA optimizations */
+    SWS_ACCURATE_RND | SWS_BITEXACT,
 };
 
 /* Limit the range of av_tree_enumerate() to only matching uop and type */

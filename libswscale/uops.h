@@ -82,6 +82,7 @@ typedef uint32_t SwsUOpFlags;
 typedef enum SwsUOpFlagBits {
     SWS_UOP_FLAG_NONE = 0,
     SWS_UOP_FLAG_FMA  = (1 << 0), /* platform supports FMA ops */
+    SWS_UOP_FLAG_MOVE = (1 << 1), /* platform supports SWS_UOP_MOVE */
 } SwsUOpFlagBits;
 
 typedef enum SwsUOpType {
@@ -91,6 +92,7 @@ typedef enum SwsUOpType {
     SWS_UOP_READ_PLANAR,     /* simple planar byte-aligned read */
     SWS_UOP_READ_PLANAR_FH,  /* planar read with horizontal filter */
     SWS_UOP_READ_PLANAR_FV,  /* planar read with vertical filter */
+    SWS_UOP_READ_PLANAR_FV_FMA,
     SWS_UOP_READ_PACKED,     /* simple packed byte-aligned read */
     SWS_UOP_READ_NIBBLE,     /* fractional read (4 bits) from single plane */
     SWS_UOP_READ_BIT,        /* fractional read (1 bit) from single plane */
@@ -103,6 +105,7 @@ typedef enum SwsUOpType {
     /* Data rearrangement uops; mask = non-trivial and needed components */
     SWS_UOP_PERMUTE,         /* rearrange components (no duplicates) */
     SWS_UOP_COPY,            /* copy/duplicate components */
+    SWS_UOP_MOVE,            /* series of register-register assignments */
 
     /* Data conversion / manipulation uops; mask = affected components */
     SWS_UOP_SWAP_BYTES,      /* swap byte order in components */
@@ -127,11 +130,16 @@ typedef enum SwsUOpType {
     SWS_UOP_RSHIFT,          /* mask = components to shift */
     SWS_UOP_CLEAR,           /* mask = components to clear */
     SWS_UOP_LINEAR,          /* mask = non-trivial output rows */
+    SWS_UOP_LINEAR_FMA,      /* with SWS_UOP_FLAG_FMA */
     SWS_UOP_DITHER,          /* mask = components to dither */
 
     /* Platform-specific uops would go here */
     SWS_UOP_TYPE_NB,
 } SwsUOpType;
+
+typedef struct SwsFilterUOp {
+    SwsPixelType type; /* pixel type to store result as */
+} SwsFilterUOp;
 
 typedef struct SwsShiftUOp {
     uint8_t amount;
@@ -140,6 +148,16 @@ typedef struct SwsShiftUOp {
 typedef struct SwsSwizzleUOp {
     uint8_t in[4]; /* input component for each output component */
 } SwsSwizzleUOp;
+
+typedef struct SwsMoveUOp {
+    /* The worst case number of moves (for two independent cycles) */
+    #define SWS_UOP_MOVE_MAX 6
+    int num_moves;
+
+    /* This may involve a temporary register (index -1) */
+    int8_t dst[SWS_UOP_MOVE_MAX]; /* destination register index */
+    int8_t src[SWS_UOP_MOVE_MAX]; /* source register index */
+} SwsMoveUOp;
 
 typedef struct SwsPackUOp {
     uint8_t pattern[4]; /* bit depth pattern, from MSB to LSB */
@@ -153,6 +171,9 @@ typedef struct SwsClearUOp {
 typedef struct SwsLinearUOp {
     uint32_t one;  /* mask of coefficients equal to one */
     uint32_t zero; /* mask of coefficients equal to zero */
+
+    /* for SWS_UOP_LINEAR_FMA only */
+    uint32_t exact; /* mask of coefficients whose product is exact */
 } SwsLinearUOp;
 
 typedef struct SwsDitherUOp {
@@ -167,8 +188,10 @@ typedef struct SwsDitherUOp {
 int ff_sws_dither_height(const SwsDitherUOp *dither);
 
 typedef union SwsUOpParams {
+    SwsFilterUOp    filter; /* for SWS_UOP_READ_*_FV/FH */
     SwsShiftUOp     shift;
     SwsSwizzleUOp   swizzle;
+    SwsMoveUOp      move;
     SwsPackUOp      pack;
     SwsClearUOp     clear;
     SwsLinearUOp    lin;

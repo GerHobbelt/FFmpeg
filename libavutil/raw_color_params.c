@@ -1,6 +1,5 @@
 /*
- * Chomp bitstream filter
- * Copyright (c) 2010 Alex Converse <alex.converse@gmail.com>
+ * Copyright (c) 2026 Lynne <dev@lynne.ee>
  *
  * This file is part of FFmpeg.
  *
@@ -19,27 +18,30 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavcodec/bsf.h"
-#include "libavcodec/bsf_internal.h"
+#include "raw_color_params.h"
+#include "mem.h"
 
-static int chomp_filter(AVBSFContext *ctx, AVPacket *pkt)
+AVRawColorParams *av_raw_color_params_alloc(size_t *size)
 {
-    int ret;
+    AVRawColorParams *p = av_mallocz(sizeof(AVRawColorParams));
+    if (!p)
+        return NULL;
 
-    ret = ff_bsf_get_packet_ref(ctx, pkt);
-    if (ret < 0)
-        return ret;
+    if (size)
+        *size = sizeof(*p);
 
-    while (pkt->size > 0 && !pkt->data[pkt->size - 1])
-        pkt->size--;
-
-    return 0;
+    return p;
 }
 
-/**
- * This filter removes a string of NULL bytes from the end of a packet.
- */
-const FFBitStreamFilter ff_chomp_bsf = {
-    .p.name = "chomp",
-    .filter = chomp_filter,
-};
+AVRawColorParams *av_raw_color_params_create_side_data(AVFrame *frame)
+{
+    AVFrameSideData *side_data =
+        av_frame_new_side_data(frame, AV_FRAME_DATA_RAW_COLOR_PARAMS,
+                               sizeof(AVRawColorParams));
+    if (!side_data)
+        return NULL;
+
+    memset(side_data->data, 0, side_data->size);
+
+    return (AVRawColorParams *)side_data->data;
+}

@@ -95,7 +95,6 @@
 
 static const SwsOpTable op_table = {
     .block_size = SWS_BLOCK_SIZE,
-    .uops = true,
     .entries = {
         REF_ALL_UOPS(U8)
         REF_ALL_UOPS(U16)
@@ -135,7 +134,7 @@ static void process(const SwsOpExec *exec, const void *priv,
     }
 }
 
-static int compile(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
+static int compile(SwsContext *ctx, const SwsOpList *ops, SwsCompiledOp *out)
 {
     int ret;
 
