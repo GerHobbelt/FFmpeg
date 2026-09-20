@@ -32,7 +32,7 @@ struct TileData {
    uint size;
 };
 
-layout (set = 0, binding = 0) uniform writeonly uimage2D dst;
+layout (set = 0, binding = 0, r16ui) uniform writeonly uimage2D dst;
 layout (set = 0, binding = 1, scalar) readonly buffer frame_data_buf {
     TileData tile_data[];
 };
@@ -98,13 +98,8 @@ int get_value(int16_t codebook)
         return 0;
     int q = 31 - findMSB(b);
 
-    if ((b & 0x80000000) != 0) {
-        skip_bits(gb, 1 + rice_order);
-        return int((b & 0x7FFFFFFF) >> (31 - rice_order));
-    }
-
     if (q <= switch_bits) {
-        skip_bits(gb, q + rice_order + 1);
+        skip_bits_unchecked(gb, q + rice_order + 1);
         return int((q << rice_order) +
                    (((b << (q + 1)) >> 1) >> (31 - rice_order)));
     }
