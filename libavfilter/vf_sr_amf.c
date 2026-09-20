@@ -53,15 +53,6 @@
 #endif
 
 
-static enum AVPixelFormat amf_inlink_sw_format(AVFilterLink *inlink)
-{
-    FilterLink *inl = ff_filter_link(inlink);
-
-    if (inl->hw_frames_ctx)
-        return ((AVHWFramesContext*)inl->hw_frames_ctx->data)->sw_format;
-    return inlink->format;
-}
-
 static int amf_hq_scaler_needs_packed_rgb(int algorithm)
 {
     return algorithm == AMF_HQ_SCALER_ALGORITHM_VIDEOSR1_1 ||
@@ -77,17 +68,8 @@ static int amf_is_packed_rgb(enum AVPixelFormat format)
 static int amf_filter_query_formats(AVFilterContext *avctx)
 {
     AMFFilterContext *ctx = avctx->priv;
-    const enum AVPixelFormat *input_pix_fmts, *output_pix_fmts;
+    const enum AVPixelFormat *input_pix_fmts;
     static const enum AVPixelFormat input_pix_fmts_default[] = {
-        AV_PIX_FMT_NV12,
-        AV_PIX_FMT_P010,
-        AV_PIX_FMT_BGRA,
-        AV_PIX_FMT_RGBA,
-        AV_PIX_FMT_AMF_SURFACE,
-        AV_PIX_FMT_RGBAF16,
-        AV_PIX_FMT_NONE,
-    };
-    static const enum AVPixelFormat output_pix_fmts_default[] = {
         AV_PIX_FMT_NV12,
         AV_PIX_FMT_P010,
         AV_PIX_FMT_BGRA,
@@ -105,18 +87,35 @@ static int amf_filter_query_formats(AVFilterContext *avctx)
         AV_PIX_FMT_X2BGR10,
         AV_PIX_FMT_RGBAF16,
         AV_PIX_FMT_AMF_SURFACE,
+        AV_PIX_FMT_D3D11,
+        AV_PIX_FMT_DXVA2_VLD,
         AV_PIX_FMT_NONE,
     };
+    enum AVPixelFormat pix_fmts_requested[] = {
+        AV_PIX_FMT_NONE,
+        AV_PIX_FMT_AMF_SURFACE,
+        AV_PIX_FMT_D3D11,
+        AV_PIX_FMT_DXVA2_VLD,
+        AV_PIX_FMT_NONE,
+    };
+    int i;
 
-    if (amf_hq_scaler_needs_packed_rgb(ctx->algorithm)) {
-        input_pix_fmts  = pix_fmts_packed_rgb;
-        output_pix_fmts = pix_fmts_packed_rgb;
-    } else {
-        input_pix_fmts  = input_pix_fmts_default;
-        output_pix_fmts = output_pix_fmts_default;
+    if (amf_hq_scaler_needs_packed_rgb(ctx->algorithm))
+        input_pix_fmts = pix_fmts_packed_rgb;
+    else
+        input_pix_fmts = input_pix_fmts_default;
+
+    if (ctx->format_opt != AV_PIX_FMT_NONE) {
+        for (i = 0; input_pix_fmts[i] != AV_PIX_FMT_NONE; i++) {
+            if (input_pix_fmts[i] == ctx->format_opt) {
+                pix_fmts_requested[0] = ctx->format_opt;
+                input_pix_fmts = pix_fmts_requested;
+                break;
+            }
+        }
     }
 
-    return amf_setup_input_output_formats(avctx, input_pix_fmts, output_pix_fmts);
+    return amf_setup_input_output_formats(avctx, input_pix_fmts);
 }
 
 static int amf_filter_config_output(AVFilterLink *outlink)
@@ -133,24 +132,27 @@ static int amf_filter_config_output(AVFilterLink *outlink)
     int needs_conversion;
 
     in_sw_format = amf_inlink_sw_format(inlink);
-    needs_conversion = amf_hq_scaler_needs_packed_rgb(ctx->algorithm) &&
-                       (in_sw_format == AV_PIX_FMT_NV12 || in_sw_format == AV_PIX_FMT_P010);
+    ctx->format = ctx->format_opt;
 
     if (amf_hq_scaler_needs_packed_rgb(ctx->algorithm)) {
-        if (!needs_conversion) {
-            if (ctx->format != AV_PIX_FMT_NONE && ctx->format != in_sw_format) {
-                av_log(avctx, AV_LOG_ERROR, "The HQ scaler does not convert formats, format must be same or %s.\n",
-                       av_get_pix_fmt_name(in_sw_format));
-                return AVERROR(EINVAL);
-            }
-            ctx->format = in_sw_format;
-        } else if (ctx->format == AV_PIX_FMT_NONE) {
-            ctx->format = in_sw_format == AV_PIX_FMT_P010 ? AV_PIX_FMT_X2BGR10 : AV_PIX_FMT_RGBA;
+        if (ctx->format == AV_PIX_FMT_NONE) {
+            if (amf_is_packed_rgb(in_sw_format))
+                ctx->format = in_sw_format;
+            else
+                ctx->format = in_sw_format == AV_PIX_FMT_P010 ? AV_PIX_FMT_X2BGR10 : AV_PIX_FMT_RGBA;
         } else if (!amf_is_packed_rgb(ctx->format)) {
             av_log(avctx, AV_LOG_ERROR, "This algorithm only outputs packed RGB, format=%s is not supported.\n",
                    av_get_pix_fmt_name(ctx->format));
             return AVERROR(EINVAL);
         }
+        needs_conversion = ctx->format != in_sw_format;
+    } else if (ctx->format != AV_PIX_FMT_NONE && ctx->format != in_sw_format) {
+        av_log(avctx, AV_LOG_ERROR, "The HQ scaler does not convert formats, format must be same or %s.\n",
+               av_get_pix_fmt_name(in_sw_format));
+        return AVERROR(EINVAL);
+    } else {
+        ctx->format = in_sw_format;
+        needs_conversion = 0;
     }
 
     err = amf_init_filter_config(outlink, &in_format);
@@ -161,7 +163,7 @@ static int amf_filter_config_output(AVFilterLink *outlink)
         AMFSize in_size = { inlink->w, inlink->h };
 
         res = ctx->amf_device_ctx->factory->pVtbl->CreateComponent(ctx->amf_device_ctx->factory, ctx->amf_device_ctx->context, AMFVideoConverter, &ctx->pre_converter);
-        AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFVideoConverter, res);
+        AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFVideoConverter, res);
 
         AMF_ASSIGN_PROPERTY_INT64(res, ctx->pre_converter, AMF_VIDEO_CONVERTER_OUTPUT_FORMAT, (amf_int32)av_av_to_amf_format(ctx->format));
         AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_UNKNOWN, "AMFConverter-SetProperty() failed with error %d\n", res);
@@ -186,7 +188,7 @@ static int amf_filter_config_output(AVFilterLink *outlink)
     }
     // FIXME: add checks whether we have HW context
     res = ctx->amf_device_ctx->factory->pVtbl->CreateComponent(ctx->amf_device_ctx->factory, ctx->amf_device_ctx->context, AMFHQScaler, &ctx->component);
-    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFHQScaler, res);
+    AMF_RETURN_IF_FALSE(avctx, res == AMF_OK, AVERROR_FILTER_NOT_FOUND, "CreateComponent(%ls) failed with error %d\n", AMFHQScaler, res);
 
     mem_type = av_amf_get_memory_type(ctx->amf_device_ctx);
     if (mem_type != AMF_MEMORY_UNKNOWN)
@@ -248,7 +250,6 @@ static const AVFilterPad amf_filter_inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = amf_filter_filter_frame,
     }
 };
 
@@ -269,6 +270,7 @@ FFFilter ff_vf_sr_amf = {
 
     .init          = amf_filter_init,
     .uninit        = amf_filter_uninit,
+    .activate      = amf_filter_activate,
     FILTER_INPUTS(amf_filter_inputs),
     FILTER_OUTPUTS(amf_filter_outputs),
     FILTER_QUERY_FUNC(&amf_filter_query_formats),
