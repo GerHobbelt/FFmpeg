@@ -4704,9 +4704,8 @@ static void mov_fix_index(MOVContext *mov, AVStream *st)
 
                     if (edit_list_start_encountered == 0) {
                         num_discarded_begin++;
-                        frame_duration_buffer = av_realloc(frame_duration_buffer,
-                                                           num_discarded_begin * sizeof(int64_t));
-                        if (!frame_duration_buffer) {
+                        if (av_reallocp_array(&frame_duration_buffer, num_discarded_begin,
+                                              sizeof(*frame_duration_buffer)) < 0) {
                             av_log(mov->fc, AV_LOG_ERROR, "Cannot reallocate frame duration buffer\n");
                             break;
                         }
@@ -8519,12 +8518,12 @@ static int mov_read_tenc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         if (!sc->cenc.encryption_index)
             return AVERROR(ENOMEM);
     }
-    sc->cenc.per_sample_iv_size = avio_r8(pb);
-    if (sc->cenc.per_sample_iv_size != 0 && sc->cenc.per_sample_iv_size != 8 &&
-        sc->cenc.per_sample_iv_size != 16) {
+    iv_size = avio_r8(pb);
+    if (iv_size != 0 && iv_size != 8 && iv_size != 16) {
         av_log(c->fc, AV_LOG_ERROR, "invalid per-sample IV size value\n");
         return AVERROR_INVALIDDATA;
     }
+    sc->cenc.per_sample_iv_size = iv_size;
     if (avio_read(pb, sc->cenc.default_encrypted_sample->key_id, 16) != 16) {
         av_log(c->fc, AV_LOG_ERROR, "failed to read the default key ID\n");
         return AVERROR_INVALIDDATA;
