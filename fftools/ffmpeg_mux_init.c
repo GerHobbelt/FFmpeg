@@ -1563,9 +1563,12 @@ static int ost_add(Muxer *mux, const OptionsContext *o, enum AVMediaType type,
     }
 
     opt_match_per_stream_dbl(ost, &o->qscale, oc, st, &qscale);
-    if (ost->enc && qscale >= 0) {
-        ost->enc->flags          |= AV_CODEC_FLAG_QSCALE;
-        ost->enc->global_quality  = FF_QP2LAMBDA * qscale;
+    if (ost->enc) {
+        if (qscale >= 0) {
+            ost->enc->flags          |= AV_CODEC_FLAG_QSCALE;
+            ost->enc->global_quality  = FF_QP2LAMBDA * qscale;
+        } else
+            ost->enc->global_quality  = ost->enc->enc_ctx->global_quality;
     }
 
     if (ms->sch_idx >= 0) {
@@ -2478,7 +2481,10 @@ static int of_serialize_options(Muxer *mux, void *obj, AVBPrint *bp)
     char *ptr;
     int ret;
 
-    ret = av_opt_serialize(obj, 0, AV_OPT_SERIALIZE_SKIP_DEFAULTS | AV_OPT_SERIALIZE_SEARCH_CHILDREN,
+    ret = av_opt_serialize(obj, AV_OPT_FLAG_DEPRECATED,
+                           AV_OPT_SERIALIZE_SKIP_DEFAULTS |
+                           AV_OPT_SERIALIZE_SEARCH_CHILDREN |
+                           AV_OPT_SERIALIZE_OPT_FLAGS_EXCLUDE,
                            &ptr, '=', ':');
     if (ret < 0) {
         av_log(mux, AV_LOG_ERROR, "Failed to serialize group\n");
