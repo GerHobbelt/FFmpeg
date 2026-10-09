@@ -48,6 +48,7 @@ AVCODECOBJS-$(CONFIG_PIXBLOCKDSP)       += pixblockdsp.o
 AVCODECOBJS-$(CONFIG_HEVC_DECODER)      += hevc_add_res.o hevc_deblock.o hevc_dequant.o \
 					   hevc_idct.o hevc_pel.o hevc_pred.o hevc_sao.o
 AVCODECOBJS-$(CONFIG_PNG_DECODER)       += png.o
+AVCODECOBJS-$(CONFIG_PRORES_DECODER)    += proresdsp.o
 AVCODECOBJS-$(CONFIG_RV34DSP)           += rv34dsp.o
 AVCODECOBJS-$(CONFIG_RV40_DECODER)      += rv40dsp.o
 AVCODECOBJS-$(CONFIG_SBC_ENCODER)       += sbcdsp.o
@@ -164,7 +165,7 @@ tests/checkasm/checkasm.o: CFLAGS += -Umain
 CHECKASM := tests/checkasm/checkasm$(EXESUF)
 
 $(CHECKASM): $(CHECKASMOBJS) $(FF_STATIC_DEP_LIBS)
-	$(call LINK,$(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $(CHECKASMOBJS) $(FF_STATIC_DEP_LIBS) $(EXTRALIBS-avcodec) $(EXTRALIBS-avfilter) $(EXTRALIBS-avformat) $(EXTRALIBS-avutil) $(EXTRALIBS-swresample) $(EXTRALIBS) $(EXTRALIBS-checkasm))
+	$(call LINK,$(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $(CHECKASMOBJS) $(FF_STATIC_DEP_LIBS) $(EXTRALIBS-avcodec) $(EXTRALIBS-avfilter) $(EXTRALIBS-avformat) $(EXTRALIBS-avutil) $(EXTRALIBS-swresample) $(EXTRALIBS-swscale) $(EXTRALIBS) $(EXTRALIBS-checkasm))
 
 run-checkasm: $(CHECKASM)
 run-checkasm:
