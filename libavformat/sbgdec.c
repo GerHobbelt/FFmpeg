@@ -549,7 +549,7 @@ static int parse_time_sequence(struct sbg_parser *p, int inblock)
 
     if (av_sat_add64(p->current_time.t, rel_ts) != p->current_time.t + (uint64_t)rel_ts)
         return AVERROR_INVALIDDATA;
-    ts.t    = p->current_time.t + rel_ts;
+    ts.t    = inblock ? rel_ts : p->current_time.t + rel_ts;
     r = parse_fade(p, &fade);
     if (r < 0)
         return r;
@@ -945,7 +945,8 @@ static int expand_timestamps(void *log, struct sbg_script *s)
 }
 
 static int expand_tseq(void *log, struct sbg_script *s, int *nb_ev_max,
-                       int64_t t0, struct sbg_script_tseq *tseq)
+                       int64_t max_events, int64_t t0,
+                       struct sbg_script_tseq *tseq)
 {
     int i, r;
     struct sbg_script_definition *def;
@@ -975,16 +976,20 @@ static int expand_tseq(void *log, struct sbg_script *s, int *nb_ev_max,
     if (def->type == 'B') {
         be = s->block_tseq + def->elements;
         for (i = 0; i < def->nb_elements; i++) {
-            r = expand_tseq(log, s, nb_ev_max, t0, &be[i]);
+            r = expand_tseq(log, s, nb_ev_max, max_events, t0, &be[i]);
             if (r < 0)
                 return r;
         }
     } else {
+        if (s->nb_events >= max_events) {
+            av_log(log, AV_LOG_ERROR, "Too many events\n");
+            return AVERROR_INVALIDDATA;
+        }
         ev = alloc_array_elem((void **)&s->events, sizeof(*ev),
                               &s->nb_events, nb_ev_max);
         if (!ev)
             return AVERROR(ENOMEM);
-        ev->ts          = tseq->ts.t;
+        ev->ts          = t0;
         ev->elements    = def->elements;
         ev->nb_elements = def->nb_elements;
         ev->fade        = tseq->fade;
@@ -993,7 +998,7 @@ static int expand_tseq(void *log, struct sbg_script *s, int *nb_ev_max,
     return 0;
 }
 
-static int expand_script(void *log, struct sbg_script *s)
+static int expand_script(void *log, struct sbg_script *s, int64_t max_events)
 {
     int i, r, nb_events_max = 0;
 
@@ -1001,7 +1006,7 @@ static int expand_script(void *log, struct sbg_script *s)
     if (r < 0)
         return r;
     for (i = 0; i < s->nb_tseq; i++) {
-        r = expand_tseq(log, s, &nb_events_max, 0, &s->tseq[i]);
+        r = expand_tseq(log, s, &nb_events_max, max_events, 0, &s->tseq[i]);
         if (r < 0)
             return r;
     }
@@ -1347,15 +1352,15 @@ static int generate_intervals(void *log, struct sbg_script *s, int sample_rate,
 static int encode_intervals(struct sbg_script *s, AVCodecParameters *par,
                             struct ws_intervals *inter)
 {
-    int i, edata_size = 4, ret;
+    int i, ret;
+    int64_t edata_size = 4;
     uint8_t *edata;
 
-    for (i = 0; i < inter->nb_inter; i++) {
+    for (i = 0; i < inter->nb_inter; i++)
         edata_size += inter->inter[i].type == WS_SINE  ? 44 :
                       inter->inter[i].type == WS_NOISE ? 32 : 0;
-        if (edata_size < 0)
-            return AVERROR(ENOMEM);
-    }
+    if (edata_size > INT_MAX)
+        return AVERROR(ENOMEM);
     if ((ret = ff_alloc_extradata(par, edata_size)) < 0)
         return ret;
     edata = par->extradata;
@@ -1426,7 +1431,7 @@ static av_cold int sbg_read_header(AVFormatContext *avf)
     if (script.opt_mix)
         av_log(avf, AV_LOG_WARNING, "Mix feature not implemented: "
                "-m is ignored and mix channels will be silent.\n");
-    r = expand_script(avf, &script);
+    r = expand_script(avf, &script, 4 * (int64_t)bprint.len + 16384);
     if (r < 0)
         goto fail2;
     av_bprint_finalize(&bprint, NULL);

@@ -1379,7 +1379,7 @@ static int mov_read_clap(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     int width, height, err = 0;
     AVRational aperture_width, aperture_height, horiz_off, vert_off;
     AVRational pc_x, pc_y;
-    uint64_t top, bottom, left, right;
+    int64_t top, bottom, left, right;
 
     item = get_heif_item(c, c->cur_item_id);
     st = get_curr_st(c);
@@ -1407,9 +1407,9 @@ static int mov_read_clap(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     vert_off.num  = avio_rb32(pb);
     vert_off.den  = avio_rb32(pb);
 
-    if (aperture_width.num  < 0 || aperture_width.den  < 0 ||
-        aperture_height.num < 0 || aperture_height.den < 0 ||
-        horiz_off.den       < 0 || vert_off.den        < 0) {
+    if (aperture_width.num  < 0 || aperture_width.den  <= 0 ||
+        aperture_height.num < 0 || aperture_height.den <= 0 ||
+        horiz_off.den      <= 0 || vert_off.den        <= 0) {
         err = AVERROR_INVALIDDATA;
         goto fail;
     }
@@ -1438,8 +1438,8 @@ static int mov_read_clap(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     top    = av_q2d(av_sub_q(pc_y, aperture_height));
     bottom = av_q2d(av_add_q(pc_y, aperture_height));
 
-    if (bottom > (height - 1) ||
-        right  > (width  - 1)) {
+    if (top  < 0 || bottom < 0 || bottom > (height - 1) ||
+        left < 0 || right  < 0 || right  > (width  - 1)) {
         err = AVERROR_INVALIDDATA;
         goto fail;
     }
@@ -2995,8 +2995,8 @@ static void mov_parse_stsd_video(MOVContext *c, AVIOContext *pb,
     }
 }
 
-static void mov_parse_stsd_audio(MOVContext *c, AVIOContext *pb,
-                                 AVStream *st, MOVStreamContext *sc)
+static int mov_parse_stsd_audio(MOVContext *c, AVIOContext *pb,
+                                AVStream *st, MOVStreamContext *sc)
 {
     int bits_per_sample, flags;
     uint16_t version = avio_rb16(pb);
@@ -3035,8 +3035,18 @@ static void mov_parse_stsd_audio(MOVContext *c, AVIOContext *pb,
             sc->bytes_per_frame = avio_rb32(pb);
             avio_rb32(pb); /* bytes per sample */
         } else if (version == 2) {
+            double sample_rate;
+
             avio_rb32(pb); /* sizeof struct only */
-            st->codecpar->sample_rate = av_int2double(avio_rb64(pb));
+            sample_rate = av_int2double(avio_rb64(pb));
+
+            if (sample_rate < 0 || sample_rate > INT_MAX ||
+                isnan(sample_rate)) {
+                av_log(c->fc, AV_LOG_ERROR, "Invalid sample rate %g\n",
+                       sample_rate);
+                return AVERROR_INVALIDDATA;
+            }
+            st->codecpar->sample_rate = sample_rate;
             channel_count = avio_rb32(pb);
             st->codecpar->ch_layout.order = AV_CHANNEL_ORDER_UNSPEC;
             st->codecpar->ch_layout.nb_channels = channel_count;
@@ -3114,6 +3124,8 @@ static void mov_parse_stsd_audio(MOVContext *c, AVIOContext *pb,
         st->codecpar->bits_per_coded_sample = bits_per_sample;
         sc->sample_size = (bits_per_sample >> 3) * st->codecpar->ch_layout.nb_channels;
     }
+
+    return 0;
 }
 
 static void mov_parse_stsd_subtitle(MOVContext *c, AVIOContext *pb,
@@ -3407,7 +3419,9 @@ int ff_mov_read_stsd_entries(MOVContext *c, AVIOContext *pb, int entries)
         if (st->codecpar->codec_type==AVMEDIA_TYPE_VIDEO) {
             mov_parse_stsd_video(c, pb, st, sc);
         } else if (st->codecpar->codec_type==AVMEDIA_TYPE_AUDIO) {
-            mov_parse_stsd_audio(c, pb, st, sc);
+            ret = mov_parse_stsd_audio(c, pb, st, sc);
+            if (ret < 0)
+                return ret;
             if (st->codecpar->sample_rate < 0) {
                 av_log(c->fc, AV_LOG_ERROR, "Invalid sample rate %d\n", st->codecpar->sample_rate);
                 return AVERROR_INVALIDDATA;
@@ -4205,7 +4219,7 @@ static int get_edit_list_entry(MOVContext *mov,
                                      global_timescale);
 
     if (*edit_list_duration < 0 ||
-        *edit_list_duration + (uint64_t)*edit_list_media_time > INT64_MAX)
+        *edit_list_media_time > INT64_MAX - *edit_list_duration)
         *edit_list_duration = 0;
 
     return 1;
@@ -4277,17 +4291,8 @@ static int find_prev_closest_index(AVStream *st,
         av_assert0(tts_index);
         av_assert0(tts_sample);
         // Find out the ctts_index for the found frame.
-        *tts_index = 0;
+        *tts_index = FFMIN(*index, tts_count);
         *tts_sample = 0;
-        for (int64_t index_tts_count = 0; index_tts_count < *index; index_tts_count++) {
-            if (*tts_index < tts_count) {
-                (*tts_sample)++;
-                if (tts_data[*tts_index].count == *tts_sample) {
-                    (*tts_index)++;
-                    *tts_sample = 0;
-                }
-            }
-        }
 
         while (*index >= 0 && (*tts_index) >= 0 && (*tts_index) < tts_count) {
             // Find a "key frame" with PTS <= timestamp_pts (So that we can decode B-frames correctly).
@@ -4603,8 +4608,9 @@ static void mov_fix_index(MOVContext *mov, AVStream *st)
             break;
         }
         num_discarded_begin = 0;
-        if (!found_non_empty_edit && edit_list_media_time == -1) {
-            empty_edits_sum_duration += edit_list_duration;
+        if (edit_list_media_time == -1) {
+            if (!found_non_empty_edit)
+                empty_edits_sum_duration += edit_list_duration;
             continue;
         }
         found_non_empty_edit = 1;
@@ -4631,7 +4637,7 @@ static void mov_fix_index(MOVContext *mov, AVStream *st)
             // Audio decoders like AAC need need a decoder delay samples previous to the current sample,
             // to correctly decode this frame. Hence for audio we seek to a frame 1 sec. before the
             // edit_list_media_time to cover the decoder delay.
-            search_timestamp = FFMAX(search_timestamp - msc->time_scale, e_old[0].timestamp);
+            search_timestamp = FFMAX(av_sat_sub64(search_timestamp, msc->time_scale), e_old[0].timestamp);
         }
 
         if (find_prev_closest_index(st, e_old, nb_old, tts_data_old, tts_count_old, search_timestamp, 0,
@@ -10075,86 +10081,68 @@ static int mov_read_imir(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     return 0;
 }
 
-static int mov_read_iprp(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+typedef struct MOVAtomExt {
+    uint32_t type;
+    int64_t size;
+    uint8_t *data;
+} MOVAtomExt;
+
+static int mov_read_ipco(MOVContext *c, AVIOContext *pb, MOVAtom atom,
+                         MOVAtomExt **atoms, int *nb_atoms)
 {
-    typedef struct MOVAtoms {
-        FFIOContext b;
-        uint32_t type;
-        int64_t  size;
-        uint8_t *data;
-    } MOVAtoms;
-    MOVAtoms *atoms = NULL;
-    MOVAtom a;
-    unsigned count;
-    int nb_atoms = 0;
-    int version, flags;
-    int ret;
+    while (atom.size >= 8) {
+        MOVAtomExt *ref = av_dynarray2_add((void**)atoms, nb_atoms, sizeof(MOVAtomExt), NULL);
+        if (!ref)
+            return AVERROR(ENOMEM);
 
-    a.size = avio_rb32(pb);
-    a.type = avio_rl32(pb);
-
-    if (a.size < 8 || a.size > atom.size || a.type != MKTAG('i','p','c','o'))
-        return AVERROR_INVALIDDATA;
-
-    atom.size -= a.size;
-    a.size -= 8;
-    while (a.size >= 8) {
-        MOVAtoms *ref = av_dynarray2_add((void**)&atoms, &nb_atoms, sizeof(MOVAtoms), NULL);
-        if (!ref) {
-            ret = AVERROR(ENOMEM);
-            goto fail;
-        }
         ref->data = NULL;
         ref->size = avio_rb32(pb);
         ref->type = avio_rl32(pb);
-        if (ref->size > a.size || ref->size < 8)
+        if (ref->size > atom.size || ref->size < 8)
             break;
         ref->data = av_malloc(ref->size);
-        if (!ref->data) {
-            ret = AVERROR_INVALIDDATA;
-            goto fail;
-        }
-        av_log(c->fc, AV_LOG_TRACE, "ipco: index %d, box type %s\n", nb_atoms, av_fourcc2str(ref->type));
+        if (!ref->data)
+            return AVERROR_INVALIDDATA;
+
+        av_log(c->fc, AV_LOG_TRACE, "ipco: index %d, box type %s\n", *nb_atoms,
+               av_fourcc2str(ref->type));
         AV_WB32(ref->data, ref->size);
         AV_WL32(ref->data + 4, ref->type);
         if (avio_read(pb, ref->data + 8, ref->size - 8) != ref->size - 8) {
-            ret = AVERROR_INVALIDDATA;
-            goto fail;
+            return AVERROR_INVALIDDATA;
         }
-        ffio_init_read_context(&ref->b, ref->data, ref->size);
-        a.size -= ref->size;
+        atom.size -= ref->size;
     }
 
-    if (a.size) {
-        ret = AVERROR_INVALIDDATA;
-        goto fail;
-    }
+    if (atom.size)
+        return AVERROR_INVALIDDATA;
 
-    a.size = avio_rb32(pb);
-    a.type = avio_rl32(pb);
+    return 0;
+}
 
-    if (a.size < 16 || a.size > atom.size || a.type != MKTAG('i','p','m','a')) {
-        ret = AVERROR_INVALIDDATA;
-        goto fail;
-    }
+static int mov_read_ipma(MOVContext *c, AVIOContext *pb, MOVAtom atom,
+                         MOVAtomExt *atoms, int nb_atoms)
+{
+    unsigned count;
+    int version, flags;
+    int ret;
 
     version = avio_r8(pb);
     flags   = avio_rb24(pb);
     count   = avio_rb32(pb);
-    a.size -= 16;
+    atom.size -= 8;
 
     for (int i = 0; i < count; i++) {
         int item_id = version ? avio_rb32(pb) : avio_rb16(pb);
         int assoc_count = avio_r8(pb);
 
-        a.size -= (version ? 5 : 3) + assoc_count * (1 + (flags & 1));
-        if (avio_feof(pb) || a.size < 0) {
-            ret = AVERROR_INVALIDDATA;
-            goto fail;
-        }
+        atom.size -= (version ? 5 : 3) + assoc_count * (1 + (flags & 1));
+        if (avio_feof(pb) || atom.size < 0)
+            return AVERROR_INVALIDDATA;
 
         for (int j = 0; j < assoc_count; j++) {
-            MOVAtoms *ref;
+            FFIOContext b;
+            MOVAtomExt *ref;
             int index = avio_r8(pb) & 0x7f;
             if (flags & 1) {
                 index <<= 8;
@@ -10163,8 +10151,7 @@ static int mov_read_iprp(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             if (!index)
                 continue;
             if (index > nb_atoms) {
-                ret = AVERROR_INVALIDDATA;
-                goto fail;
+                return AVERROR_INVALIDDATA;
             }
             ref = &atoms[--index];
 
@@ -10173,14 +10160,54 @@ static int mov_read_iprp(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 
             c->cur_item_id = item_id;
 
-            ret = mov_read_default(c, &ref->b.pub,
+            ffio_init_read_context(&b, ref->data, ref->size);
+            ret = mov_read_default(c, &b.pub,
                                    (MOVAtom) { .size = ref->size,
                                                .type = MKTAG('i','p','c','o') });
             if (ret < 0)
-                goto fail;
-            ffio_init_read_context(&ref->b, ref->data, ref->size);
+                return ret;
         }
     }
+
+    if (atom.size)
+        return AVERROR_INVALIDDATA;
+
+    return 0;
+}
+
+static int mov_read_iprp(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    MOVAtomExt *atoms = NULL;
+    MOVAtom a;
+    int nb_atoms = 0;
+    int ret;
+
+    a.size = avio_rb32(pb);
+    a.type = avio_rl32(pb);
+
+    if (a.size <= 8 || a.size > atom.size || a.type != MKTAG('i','p','c','o'))
+        return AVERROR_INVALIDDATA;
+
+    atom.size -= a.size;
+    a.size -= 8;
+
+    ret = mov_read_ipco(c, pb, a, &atoms, &nb_atoms);
+    if (ret < 0)
+        goto fail;
+
+    a.size = avio_rb32(pb);
+    a.type = avio_rl32(pb);
+
+    if (a.size <= 8 || a.size > atom.size || a.type != MKTAG('i','p','m','a')) {
+        ret = AVERROR_INVALIDDATA;
+        goto fail;
+    }
+
+    a.size -= 8;
+
+    ret = mov_read_ipma(c, pb, a, atoms, nb_atoms);
+    if (ret < 0)
+        goto fail;
 
     ret = 0;
 fail:
@@ -11690,6 +11717,22 @@ static int mov_parse_heif_layered_video_tmap(AVFormatContext *s, const HEIFGroup
         }
         gain = NULL;
 
+        for (int k = 0; k < item->nb_iref_to_list; k++) {
+            HEIFItem *ref = get_heif_item(mov, item->iref_to_list[k].item_id);
+
+            av_assert0(ref);
+            // Remove auxl reference so we don't create the same group we made with
+            // this tmap using it. Strictly speaking, the chances for Apple style
+            // Exif values being present on a base item referenced by a tmap item
+            // are very low, but better safe than sorry.
+            if (item->iref_to_list[k].type == MKTAG('a','u','x','l') &&
+                (ref == tmap->item_list[!j])) {
+                if (k != (item->nb_iref_to_list - 1))
+                    item->iref_to_list[k] = item->iref_to_list[item->nb_iref_to_list - 1];
+                --item->nb_iref_to_list;
+                break;
+            }
+        }
         break;
     }
     av_free(gain);
