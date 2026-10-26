@@ -5520,7 +5520,8 @@ static int mov_update_iamf_streams(MOVContext *c, const AVStream *st)
         const AVStreamGroup *stg = NULL;
 
         for (int j = 0; j < c->fc->nb_stream_groups; j++)
-            if (c->fc->stream_groups[j]->id == iamf->audio_elements[i]->audio_element_id)
+            if (c->fc->stream_groups[j]->type == AV_STREAM_GROUP_PARAMS_IAMF_AUDIO_ELEMENT &&
+                c->fc->stream_groups[j]->id   == iamf->audio_elements[i]->audio_element_id)
                 stg = c->fc->stream_groups[j];
         av_assert0(stg);
 
@@ -9450,9 +9451,13 @@ static int mov_read_auxc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
            c->cur_item_id, aux_type.str);
 
     item = get_heif_item(c, c->cur_item_id);
-    if (item && (av_stristr(aux_type.str, "hdrgainmap")))
-        item->is_gainmap = 1;
-
+    if (item) {
+        if ((av_stristr(aux_type.str, "hdrgainmap")))
+            item->is_gainmap = 1;
+        else if (strstr(aux_type.str, "urn:mpeg:hevc:2015:auxid:1") ||
+                 strstr(aux_type.str, "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"))
+            item->is_alpha = 1;
+    }
     return 0;
 }
 
@@ -11109,28 +11114,22 @@ static int set_exif_from_item(AVFormatContext *s,
                                                     AV_PKT_DATA_EXIF);
     const AVExifMetadata *ifd = &item->ifd;
     AVBufferRef *buf = NULL;
-    int64_t offset;
     int err;
 
     if (sd)
         return 0;
 
-    err = av_exif_write(s, ifd, &buf, AV_EXIF_T_OFF);
+    err = av_exif_write(s, ifd, &buf, AV_EXIF_TIFF_HEADER);
     if (err < 0)
         return err;
 
-    offset = AV_RB32(buf->data) + 4;
-    if (offset >= buf->size) {
-        av_buffer_unref(&buf);
-        return AVERROR_INVALIDDATA;
-    }
     sd = av_packet_side_data_new(coded_side_data, nb_coded_side_data,
-                                 AV_PKT_DATA_EXIF, buf->size - offset, 0);
+                                 AV_PKT_DATA_EXIF, buf->size, 0);
     if (!sd) {
         av_buffer_unref(&buf);
         return AVERROR(ENOMEM);
     }
-    memcpy(sd->data, buf->data + offset, buf->size - offset);
+    memcpy(sd->data, buf->data, buf->size);
 
     av_buffer_unref(&buf);
 
@@ -11669,8 +11668,8 @@ static int mov_parse_heif_layered_video_tmap(AVFormatContext *s, const HEIFGroup
     }
     avio_r8(s->pb); /* version */
 
-    err = avio_read(s->pb, payload, tmap->item->extent_length);
-    if (err == tmap->item->extent_length)
+    err = avio_read(s->pb, payload, tmap->item->extent_length - 1);
+    if (err == (tmap->item->extent_length - 1))
         err64 = avio_seek(s->pb, pos, SEEK_SET);
     else {
         err = err < 0 ? err : AVERROR_INVALIDDATA;
@@ -11681,11 +11680,14 @@ static int mov_parse_heif_layered_video_tmap(AVFormatContext *s, const HEIFGroup
         goto fail;
     }
 
-    err = av_gain_map_params_from_iso21496(gain, payload, tmap->item->extent_length);
+    err = av_gain_map_params_from_iso21496(gain, payload, tmap->item->extent_length - 1);
     av_freep(&payload);
-    if (err < 0)
+    if (err < 0) {
+        av_log(s, AV_LOG_ERROR, "Invalid ISO 21496-1 gain map payload\n");
+        ff_remove_stream_group(s, stg);
+        err = (s->error_recognition & (AV_EF_COMPLIANT|AV_EF_EXPLODE)) ? AVERROR_INVALIDDATA : 0;
         goto fail;
-
+    }
     for (int j = 0; j < tmap->nb_items; j++) {
         HEIFItem *item = tmap->item_list[j];
         AVPacketSideData *sd;
@@ -11755,9 +11757,66 @@ fail:
     return err;
 }
 
+static int mov_parse_heif_layered_video_auxl_alpha(AVFormatContext *s,
+                                                   HEIFItem *base, HEIFItem *alpha)
+{
+    AVStreamGroupLayeredVideo *layered_video;
+    AVStreamGroup *stg;
+    int err;
+
+    if ((!alpha->st && !alpha->stg) ||
+        (!base->st && !base->stg)) {
+        av_log(s, AV_LOG_WARNING, "HEIF alpha id %d or its base doesn't reference "
+                                  "a stream or group\n",
+               alpha->item_id);
+        return 0;
+    }
+
+    stg = avformat_stream_group_create(s, AV_STREAM_GROUP_PARAMS_ALPHA, NULL);
+    if (!stg)
+        return AVERROR(ENOMEM);
+
+    stg->id = alpha->item_id;
+    layered_video = stg->params.layered_video;
+
+    layered_video->width  = base->width;
+    layered_video->height = base->height;
+    layered_video->el_index = 1;
+
+    av_assert0(!base->st != !base->stg);
+    if (base->st)
+        err = avformat_stream_group_add_stream(stg, base->st);
+    else
+        err = avformat_stream_group_add_stream_group(stg, base->stg);
+    if (err < 0) {
+        if (err == AVERROR(EEXIST))
+            err = AVERROR_INVALIDDATA;
+        return err;
+    }
+
+    av_assert0(!alpha->st != !alpha->stg);
+    if (alpha->st)
+        err = avformat_stream_group_add_stream(stg, alpha->st);
+    else
+        err = avformat_stream_group_add_stream_group(stg, alpha->stg);
+    if (err < 0) {
+        if (err == AVERROR(EEXIST))
+            err = AVERROR_INVALIDDATA;
+        return err;
+    }
+
+    // Apply all references from the base image to the Alpha group
+    err = mov_apply_heif_item_references(s, base, &stg->coded_side_data,
+                                                  &stg->nb_coded_side_data);
+    if (err < 0)
+        return err;
+
+    return 0;
+}
+
 // Parse Apple style Gain Map metadata from Exif values
 // See https://developer.apple.com/documentation/appkit/applying-apple-hdr-effect-to-your-photos
-static int mov_parse_heif_layered_video_auxl(AVFormatContext *s,
+static int mov_parse_heif_layered_video_auxl_gmap(AVFormatContext *s,
                                              HEIFItem *base, HEIFItem *gain_map)
 {
     AVStreamGroupLayeredVideo *layered_video;
@@ -11918,13 +11977,18 @@ static int mov_parse_heif_layered_video(AVFormatContext *s)
             av_assert0(ref);
             switch(item->iref_to_list[j].type) {
             case MKTAG('a','u','x','l'):
-                if (!item->is_gainmap)
+                if (item->is_alpha) {
+                    err = mov_parse_heif_layered_video_auxl_alpha(s, ref, item);
+                    if (err < 0)
+                       return err;
                     break;
-
-                err = mov_parse_heif_layered_video_auxl(s, ref, item);
-                if (err < 0)
-                   return err;
-                break;
+                }
+                if (item->is_gainmap) {
+                    err = mov_parse_heif_layered_video_auxl_gmap(s, ref, item);
+                    if (err < 0)
+                       return err;
+                    break;
+                }
             }
         }
     }
@@ -11986,15 +12050,13 @@ static int mov_parse_heif_items(AVFormatContext *s)
         mov_build_index(mov, st);
     }
 
-    if (mov->nb_heif_group) {
-        err = mov_parse_tiles(s);
-        if (err < 0)
-            return err;
+    err = mov_parse_tiles(s);
+    if (err < 0)
+        return err;
 
-        err = mov_parse_heif_layered_video(s);
-        if (err < 0)
-            return err;
-    }
+    err = mov_parse_heif_layered_video(s);
+    if (err < 0)
+        return err;
 
     return 0;
 }

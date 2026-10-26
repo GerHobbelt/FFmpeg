@@ -298,15 +298,10 @@ static void run_copy(const SwsFrame *out, const SwsFrame *in, int y, int h,
 
         if (in_data[i] == out_data[i]) {
             av_assert0(in->linesize[i] == out->linesize[i]);
-        } else if (in->linesize[i] == out->linesize[i]) {
-            memcpy(out_data[i], in_data[i], lines * out->linesize[i]);
         } else {
-            const int linesize = FFMIN(out->linesize[i], in->linesize[i]);
-            for (int j = 0; j < lines; j++) {
-                memcpy(out_data[i], in_data[i], linesize);
-                in_data[i]  += in->linesize[i];
-                out_data[i] += out->linesize[i];
-            }
+            ff_copyPlane(in_data[i], in->linesize[i], 0, lines,
+                         av_image_get_linesize(out->format, out->width, i),
+                         out_data[i], out->linesize[i]);
         }
     }
 }
@@ -721,7 +716,7 @@ static int add_ops_convert_pass(SwsGraph *graph, const SwsFormat *src,
            av_get_pix_fmt_name(src->format), av_get_pix_fmt_name(dst->format));
 
     av_log(ctx, AV_LOG_DEBUG, "Unoptimized operation list:\n");
-    ff_sws_op_list_update_comps(ops);
+    ff_sws_op_list_update(ops);
     ff_sws_op_list_print(ctx, AV_LOG_DEBUG, AV_LOG_TRACE, ops);
 
     const int flags = SWS_OP_FLAG_OPTIMIZE | SWS_OP_FLAG_SPLIT_MEMCPY;
